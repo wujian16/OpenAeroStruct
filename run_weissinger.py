@@ -6,7 +6,7 @@ import sys
 import warnings
 warnings.filterwarnings("ignore")
 
-from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, SqliteRecorder, pyOptSparseDriver, profile
+from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, SqliteRecorder
 from geometry import GeometryMesh, gen_crm_mesh, gen_mesh
 from transfer import TransferDisplacements, TransferLoads
 from weissinger import WeissingerStates, WeissingerFunctionals
@@ -25,12 +25,12 @@ execfile('CRM.py')
 
 if 1:
     num_x = 3
-    num_y = 41
+    num_y = 5
     span = 10.
     chord = 1.
     amt_of_cos = 1.
     mesh = gen_mesh(num_x, num_y, span, chord, amt_of_cos)
-    num_twist = int((num_y - 1) / 5)
+    num_twist = numpy.max([int((num_y - 1) / 5), 5])
 
 
 disp = numpy.zeros((num_y, 6))
@@ -42,7 +42,7 @@ des_vars = [
     ('dihedral', 0.),
     ('sweep', 0.),
     ('span', span),
-    ('taper', .5),
+    ('taper', 1.),
     ('v', v),
     ('alpha', alpha),
     ('rho', rho),
@@ -73,7 +73,7 @@ prob.driver.options['optimizer'] = 'SLSQP'
 prob.driver.options['disp'] = True
 prob.driver.options['tol'] = 1.0e-8
 
-if 1:
+if 0:
     prob.driver = pyOptSparseDriver()
     prob.driver.options['optimizer'] = "SNOPT"
     prob.driver.opt_settings = {'Major optimality tolerance': 1.0e-8,

@@ -2,7 +2,7 @@
 
 Usage is
 `python plot_all.py a` for aero only,
-`python plot_all.py as` for struct only,
+`python plot_all.py s` for struct only,
 `python plot_all.py as` for aerostruct, or
 `python plot_all.py __name__` for user-named database.
 
@@ -106,7 +106,6 @@ class Display(object):
         rho = []
         v = []
         self.CL = []
-        self.CX = []
         self.AR = []
         self.S_ref = []
         self.obj = []
@@ -154,7 +153,6 @@ class Display(object):
                 rho.append(case_data['Unknowns']['rho'])
                 v.append(case_data['Unknowns']['v'])
                 self.CL.append(case_data['Unknowns']['CL1'])
-                self.CX.append(case_data['Unknowns']['CX'])
                 self.S_ref.append(case_data['Unknowns']['S_ref'])
                 self.show_wing = True
             except:
@@ -347,10 +345,10 @@ class Display(object):
         obj_val = round_to_n(self.obj[self.curr_pos], 7)
         self.ax.text2D(.55, .05, self.obj_key + ': {}'.format(obj_val),
             transform=self.ax.transAxes, color='k')
-        span_eff = (self.CL[self.curr_pos]**2 + self.CX[self.curr_pos]**2) / \
-            numpy.pi / self.AR[self.curr_pos] / obj_val
-        self.ax.text2D(.55, .0, 'e: {}'.format(span_eff),
-            transform=self.ax.transAxes, color='k')
+        if self.show_wing and not self.show_tube:
+            span_eff = self.CL[self.curr_pos]**2 / numpy.pi / self.AR[self.curr_pos] / obj_val
+            self.ax.text2D(.55, .0, 'e: {}'.format(span_eff),
+                transform=self.ax.transAxes, color='k')
 
         self.ax.view_init(elev=el, azim=az)  # Reproduce view
         self.ax.dist = dist

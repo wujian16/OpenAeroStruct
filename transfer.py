@@ -59,13 +59,13 @@ class TransferDisplacements(Component):
 class TransferLoads(Component):
     """ Performs load transfer """
 
-    def __init__(self, n, fem_origin=0.35):
+    def __init__(self, nx, n, fem_origin=0.35):
         super(TransferLoads, self).__init__()
 
         self.fem_origin = fem_origin
 
         self.add_param('def_mesh', val=numpy.zeros((2, n, 3)))
-        self.add_param('sec_forces', val=numpy.zeros((n - 1, 3), dtype="complex"))
+        self.add_param('sec_forces', val=numpy.zeros((nx-1, n - 1, 3), dtype="complex"))
         self.add_output('loads', val=numpy.zeros((n, 6), dtype="complex"))
 
         self.deriv_options['type'] = 'cs'
@@ -74,8 +74,7 @@ class TransferLoads(Component):
 
     def solve_nonlinear(self, params, unknowns, resids):
         mesh = params['def_mesh']
-        sec_forces = params['sec_forces']
-
+        sec_forces = params['sec_forces'][0]
         num_x, num_y = mesh.shape[:2]
 
         w = 0.25

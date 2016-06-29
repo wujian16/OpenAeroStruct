@@ -4,7 +4,7 @@ import sys
 import time
 
 from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, Newton, ScipyGMRES, LinearGaussSeidel, NLGaussSeidel, SqliteRecorder
-from geometry import GeometryMesh, mesh_gen
+from geometry import GeometryMesh, gen_crm_mesh
 from transfer import TransferDisplacements, TransferLoads
 from weissinger import WeissingerStates, WeissingerFunctionals
 from spatialbeam import SpatialBeamStates, SpatialBeamFunctionals, radii
@@ -15,10 +15,13 @@ from openmdao.devtools.partition_tree_n2 import view_tree
 from gs_newton import HybridGSNewton
 
 # Create the mesh with 2 inboard points and 3 outboard points
-mesh = mesh_gen(n_points_inboard=2, n_points_outboard=3)
+mesh = gen_crm_mesh(n_points_inboard=2, n_points_outboard=3)
 num_y = mesh.shape[1]
+num_x = mesh.shape[0]
 r = radii(mesh)
 t = r/10
+num_twist = 5
+
 
 # Define the aircraft properties
 execfile('CRM.py')
@@ -32,7 +35,7 @@ root = Group()
 # Define the independent variables
 indep_vars = [
     ('span', span),
-    ('twist', numpy.zeros(num_y)),
+    ('twist', numpy.zeros(num_twist)),
     ('v', v),
     ('alpha', alpha),
     ('rho', rho),
@@ -50,13 +53,13 @@ indep_vars = [
 indep_vars_comp = IndepVarComp(indep_vars)
 tube_comp = MaterialsTube(num_y)
 
-mesh_comp = GeometryMesh(mesh)
+mesh_comp = GeometryMesh(mesh, num_twist)
 spatialbeamstates_comp = SpatialBeamStates(num_y, E, G)
-def_mesh_comp = TransferDisplacements(num_y)
-weissingerstates_comp = WeissingerStates(num_y)
-loads_comp = TransferLoads(num_y)
+def_mesh_comp = TransferDisplacements(num_x, num_y)
+weissingerstates_comp = WeissingerStates(num_x, num_y)
+loads_comp = TransferLoads(num_x, num_y)
 
-weissingerfuncs_comp = WeissingerFunctionals(num_y, CL0, CD0)
+weissingerfuncs_comp = WeissingerFunctionals(num_x, num_y, CL0, CD0, num_twist)
 spatialbeamfuncs_comp = SpatialBeamFunctionals(num_y, E, G, stress, mrho)
 fuelburn_comp = FunctionalBreguetRange(W0, CT, a, R, M)
 eq_con_comp = FunctionalEquilibrium(W0)
@@ -91,8 +94,8 @@ coupled.add('loads',
 # Nonlinear Gauss Seidel
 coupled.nl_solver = NLGaussSeidel()
 coupled.nl_solver.options['iprint'] = 1
-coupled.nl_solver.options['atol'] = 1e-5
-coupled.nl_solver.options['rtol'] = 1e-12
+coupled.nl_solver.options['atol'] = 1e-4
+coupled.nl_solver.options['rtol'] = 1e-4
 
 # linear solver configuration
 coupled.ln_solver = ScipyGMRES()
@@ -125,7 +128,7 @@ prob.root = root
 prob.print_all_convergence() # makes OpenMDAO print out solver convergence data
 
 # change file name to save data from each experiment separately
-prob.driver.add_recorder(SqliteRecorder('prob1a.db'))
+prob.driver.add_recorder(SqliteRecorder('prob2a.db'))
 
 prob.setup()
 # uncomment this to see an n2 diagram of your problem

@@ -5,15 +5,15 @@ import numpy
 import sys
 import time
 
-from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, SqliteRecorder, profile
-from geometry import GeometryMesh, mesh_gen, LinearInterp
+from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, SqliteRecorder
+from geometry import GeometryMesh, gen_crm_mesh, LinearInterp
 from spatialbeam_orig import SpatialBeamStates, SpatialBeamFunctionals, radii
 from materials import MaterialsTube
 from openmdao.devtools.partition_tree_n2 import view_tree
 
-# Create the mesh with 2 inboard points and 3 outboard points
-mesh = mesh_gen(n_points_inboard=10, n_points_outboard=6)
-# mesh = mesh_gen(n_points_inboard=2, n_points_outboard=2)
+# Create the mesh with 4 inboard points and 6 outboard points
+mesh = gen_crm_mesh(n_points_inboard=4, n_points_outboard=6)
+# mesh = gen_crm_mesh(n_points_inboard=2, n_points_outboard=2)
 
 num_y = mesh.shape[1]
 num_twist = 5
@@ -70,12 +70,9 @@ prob.driver.add_desvar('t',
 prob.driver.add_objective('energy')
 prob.driver.add_constraint('weight', upper=1e5)
 
-prob.root.deriv_options['type'] = 'cs'
+# prob.root.deriv_options['type'] = 'cs'
 
 prob.driver.add_recorder(SqliteRecorder('spatialbeam.db'))
-
-profile.setup(prob)
-profile.start()
 
 prob.setup()
 view_tree(prob, outfile="spatialbeam.html", show_browser=False)

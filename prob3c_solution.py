@@ -4,7 +4,7 @@ import sys
 import time
 
 from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, Newton, ScipyGMRES, LinearGaussSeidel, NLGaussSeidel, SqliteRecorder, DirectSolver
-from geometry import GeometryMesh, mesh_gen
+from geometry import GeometryMesh, gen_crm_mesh
 from transfer import TransferDisplacements, TransferLoads
 from weissinger import WeissingerStates, WeissingerFunctionals
 from spatialbeam import SpatialBeamStates, SpatialBeamFunctionals, radii
@@ -18,8 +18,10 @@ from gs_newton import HybridGSNewton
 # Change mesh size here
 ############################################################
 # Create the mesh with 2 inboard points and 3 outboard points
-mesh = mesh_gen(n_points_inboard=2, n_points_outboard=3)
+mesh = gen_crm_mesh(n_points_inboard=2, n_points_outboard=3)
+num_x = mesh.shape[0]
 num_y = mesh.shape[1]
+num_twist = 5
 r = radii(mesh)
 t = r/10
 
@@ -35,7 +37,7 @@ root = Group()
 # Define the independent variables
 indep_vars = [
     ('span', span),
-    ('twist', numpy.zeros(num_y)),
+    ('twist', numpy.zeros(num_twist)),
     ('v', v),
     ('alpha', alpha),
     ('rho', rho),
@@ -46,13 +48,13 @@ indep_vars = [
 indep_vars_comp = IndepVarComp(indep_vars)
 tube_comp = MaterialsTube(num_y)
 
-mesh_comp = GeometryMesh(mesh)
+mesh_comp = GeometryMesh(mesh, num_twist)
 spatialbeamstates_comp = SpatialBeamStates(num_y, E, G)
-def_mesh_comp = TransferDisplacements(num_y)
-weissingerstates_comp = WeissingerStates(num_y)
-loads_comp = TransferLoads(num_y)
+def_mesh_comp = TransferDisplacements(num_x, num_y)
+weissingerstates_comp = WeissingerStates(num_x, num_y)
+loads_comp = TransferLoads(num_x, num_y)
 
-weissingerfuncs_comp = WeissingerFunctionals(num_y, CL0, CD0)
+weissingerfuncs_comp = WeissingerFunctionals(num_x, num_y, CL0, CD0, num_twist)
 spatialbeamfuncs_comp = SpatialBeamFunctionals(num_y, E, G, stress, mrho)
 fuelburn_comp = FunctionalBreguetRange(W0, CT, a, R, M)
 eq_con_comp = FunctionalEquilibrium(W0)
@@ -90,7 +92,6 @@ coupled.nl_solver.newton.options['atol'] = 1e-6
 coupled.nl_solver.newton.options['rtol'] = 1e-6
 coupled.nl_solver.newton.options['iprint'] = 1
 
-
 # Krylov Solver - LNGS preconditioning
 coupled.ln_solver = ScipyGMRES()
 coupled.ln_solver.options['iprint'] = 1
@@ -121,7 +122,7 @@ root.add('eq_con',
 prob = Problem()
 prob.root = root
 
-prob.root.deriv_options['type'] = 'cs'
+prob.root.deriv_options['type'] = 'fd'
 prob.root.deriv_options['form'] = 'central'
 
 prob.driver = ScipyOptimizer()

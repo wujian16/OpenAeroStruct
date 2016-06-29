@@ -4,7 +4,7 @@ import sys
 import time
 
 from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, Newton, ScipyGMRES, LinearGaussSeidel, NLGaussSeidel, SqliteRecorder
-from geometry import GeometryMesh, mesh_gen
+from geometry import GeometryMesh, gen_crm_mesh
 from transfer import TransferDisplacements, TransferLoads
 from weissinger import WeissingerStates, WeissingerFunctionals
 from spatialbeam import SpatialBeamStates, SpatialBeamFunctionals, radii
@@ -18,7 +18,7 @@ from gs_newton import HybridGSNewton
 # Change mesh size here
 ############################################################
 # Create the mesh with 2 inboard points and 3 outboard points
-mesh = mesh_gen(n_points_inboard=2, n_points_outboard=3)
+mesh = gen_crm_mesh(n_points_inboard=2, n_points_outboard=3)
 
 num_y = mesh.shape[1]
 r = radii(mesh)
@@ -111,7 +111,7 @@ prob.root = root
 prob.print_all_convergence() # makes OpenMDAO print out solver convergence data
 
 # change file name to save data from each experiment separately
-prob.driver.add_recorder(SqliteRecorder('prob1a.db'))
+prob.driver.add_recorder(SqliteRecorder('prob2a.db'))
 
 prob.setup()
 # uncomment this to see an n2 diagram of your implementation

@@ -370,7 +370,8 @@ class WeissingerCirculations(Component):
         jac = self.alloc_jacobian()
 
         fd_jac = self.complex_step_jacobian(params, unknowns, resids,
-                                         fd_params=['normals', 'alpha'],
+                                         fd_params=['def_mesh', 'b_pts', 'c_pts',
+                                                    'normals', 'alpha'],
                                          fd_states=[])
         jac.update(fd_jac)
 
@@ -412,11 +413,9 @@ class WeissingerForces(Component):
         self.add_param('v', val=10.)
         self.add_param('rho', val=3.)
         self.add_param('widths', val=numpy.zeros((nx-1, n-1)))
-        self.add_output('sec_forces', val=numpy.zeros((nx-1, n-1, 3)))
+        self.add_output('sec_forces', val=numpy.zeros((nx-1, n-1, 3), dtype="complex"))
 
-        self.mtx = numpy.zeros((size, size, 3))
-
-        self.deriv_options['form'] = 'central'
+        self.mtx = numpy.zeros((size, size, 3), dtype="complex")
 
         self.num_y = n
         self.num_x = nx
@@ -434,6 +433,7 @@ class WeissingerForces(Component):
         _assemble_AIC_mtx(self.mtx, params['def_mesh'],
                           mid_b, params['b_pts'], params['alpha'], skip=True)
 
+
         for ind in xrange(3):
             self.v[:, ind] = self.mtx[:, :, ind].dot(circ)
         self.v[:, 0] += cosa * params['v']
@@ -444,8 +444,7 @@ class WeissingerForces(Component):
         cross = numpy.cross(self.v, bound.reshape(-1, bound.shape[-1], order='F'))
 
         for ind in xrange(3):
-            tmp = (params['rho'] * circ * cross[:, ind]).reshape(self.num_x-1, self.num_y-1, order='F')
-            unknowns['sec_forces'][:, :, ind] = tmp
+            unknowns['sec_forces'][:, :, ind] = (params['rho'] * circ * cross[:, ind]).reshape(self.num_x-1, self.num_y-1, order='F')
 
     def linearize(self, params, unknowns, resids):
         """ Jacobian for forces."""
@@ -455,8 +454,8 @@ class WeissingerForces(Component):
         n = self.num_y
 
         fd_jac = self.complex_step_jacobian(params, unknowns, resids,
-                                         fd_params=['b_pts', 'alpha',
-                                                    'circulations', 'v'],
+                                         fd_params=['def_mesh', 'alpha', 'rho',
+                                                    'circulations', 'v', 'b_pts'],
                                          fd_states=[])
         jac.update(fd_jac)
 
@@ -481,7 +480,6 @@ class WeissingerLiftDrag(Component):
         self.add_param('alpha', val=3.)
         self.add_output('L', val=0.)
         self.add_output('D', val=0.)
-        self.add_output('X', val=0.)
 
         self.deriv_options['form'] = 'central'
         #self.deriv_options['extra_check_partials_form'] = "central"
@@ -496,11 +494,10 @@ class WeissingerLiftDrag(Component):
         sina = numpy.sin(alpha)
         unknowns['L'] = numpy.sum(-forces[:, :, 0] * sina + forces[:, :, 2] * cosa)
         unknowns['D'] = numpy.sum( forces[:, :, 0] * cosa + forces[:, :, 2] * sina)
-        unknowns['X'] = numpy.sum( forces[:, :, 1])
 
 
     def linearize(self, params, unknowns, resids):
-        """ Jacobian for forces."""
+        """ Jacobian for liftdrag."""
 
         jac = self.alloc_jacobian()
 
@@ -529,12 +526,10 @@ class WeissingerCoeffs(Component):
         self.add_param('S_ref', val=0.)
         self.add_param('L', val=0.)
         self.add_param('D', val=0.)
-        self.add_param('X', val=0.)
         self.add_param('v', val=0.)
         self.add_param('rho', val=0.)
         self.add_output('CL1', val=0.)
         self.add_output('CDi', val=0.)
-        self.add_output('CX', val=0.)
 
 
         self.deriv_options['form'] = 'central'
@@ -545,11 +540,9 @@ class WeissingerCoeffs(Component):
         rho = params['rho']
         v = params['v']
         L = params['L']
-        X = params['X']
         D = params['D']
         unknowns['CL1'] = L / (0.5*rho*v**2*S_ref)
         unknowns['CDi'] = D / (0.5*rho*v**2*S_ref)
-        unknowns['CX'] = X / (0.5*rho*v**2*S_ref)
 
     def linearize(self, params, unknowns, resids):
         """ Jacobian for forces."""

@@ -5,7 +5,7 @@ import numpy
 import sys
 import time
 
-from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, Newton, ScipyGMRES, LinearGaussSeidel, NLGaussSeidel, SqliteRecorder, profile, pyOptSparseDriver, DirectSolver
+from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, Newton, ScipyGMRES, LinearGaussSeidel, NLGaussSeidel, SqliteRecorder, profile, pyOptSparseDriver
 from geometry import GeometryMesh, gen_crm_mesh
 from transfer import TransferDisplacements, TransferLoads
 from weissinger import WeissingerStates, WeissingerFunctionals
@@ -17,7 +17,7 @@ from openmdao.devtools.partition_tree_n2 import view_tree
 from gs_newton import HybridGSNewton
 
 # Create the mesh with 2 inboard points and 3 outboard points
-mesh = gen_crm_mesh(n_points_inboard=3, n_points_outboard=4)
+mesh = gen_crm_mesh(n_points_inboard=2, n_points_outboard=3)
 num_x, num_y, _ = mesh.shape
 num_twist = 5
 r = radii(mesh)
@@ -61,7 +61,7 @@ coupled.add('weissingerstates',
             WeissingerStates(num_x, num_y),
             promotes=['*'])
 coupled.add('loads',
-            TransferLoads(num_y),
+            TransferLoads(num_x, num_y),
             promotes=['*'])
 coupled.add('spatialbeamstates',
             SpatialBeamStates(num_y, E, G),
@@ -116,8 +116,8 @@ prob.driver.options['tol'] = 1.0e-8
 if 1:
     prob.driver = pyOptSparseDriver()
     prob.driver.options['optimizer'] = "SNOPT"
-    prob.driver.opt_settings = {'Major optimality tolerance': 1.0e-7,
-                                'Major feasibility tolerance': 1.0e-7}
+    prob.driver.opt_settings = {'Major optimality tolerance': 1.0e-8,
+                                'Major feasibility tolerance': 1.0e-8}
 
 prob.driver.add_desvar('twist',lower= -10.,
                        upper=10., scaler=1e0)
@@ -130,6 +130,10 @@ prob.driver.add_constraint('failure', upper=0.0)
 prob.driver.add_constraint('eq_con', equals=0.0)
 
 prob.driver.add_recorder(SqliteRecorder('aerostruct.db'))
+
+# prob.root.deriv_options['type'] = 'fd'
+# prob.root.coupled.deriv_options['type'] = 'fd'
+
 
 profile.setup(prob)
 profile.start()

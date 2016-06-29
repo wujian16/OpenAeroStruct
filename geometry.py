@@ -149,7 +149,7 @@ def mirror(mesh, right_side=True):
     return new_mesh
 
 
-def gen_crm_mesh(n_points_inboard=2, n_points_outboard=2, num_x=3, mesh=crm_base_mesh):
+def gen_crm_mesh(n_points_inboard=2, n_points_outboard=2, num_x=2, mesh=crm_base_mesh):
     """ Builds the right hand side of the CRM wing with specified number
     of inboard and outboard panels
     """
