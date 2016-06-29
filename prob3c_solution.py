@@ -122,8 +122,6 @@ root.add('eq_con',
 prob = Problem()
 prob.root = root
 
-prob.root.deriv_options['type'] = 'fd'
-prob.root.deriv_options['form'] = 'central'
 
 prob.driver = ScipyOptimizer()
 prob.driver.options['optimizer'] = 'SLSQP'
