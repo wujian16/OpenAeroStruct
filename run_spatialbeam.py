@@ -9,7 +9,7 @@ from time import time
 
 from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, SqliteRecorder
 from geometry import GeometryMesh, gen_crm_mesh, LinearInterp
-from spatialbeam_orig import SpatialBeamStates, SpatialBeamFunctionals, radii
+from spatialbeam import SpatialBeamStates, SpatialBeamFunctionals, radii
 from materials import MaterialsTube
 from openmdao.devtools.partition_tree_n2 import view_tree
 
