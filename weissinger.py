@@ -407,13 +407,11 @@ class WeissingerForces(Component):
         super(WeissingerForces, self).__init__()
         self.add_param('def_mesh', val=numpy.zeros((nx, n, 3)))
         self.add_param('b_pts', val=numpy.zeros((nx-1, n, 3)))
-        self.add_param('c_pts', val=numpy.zeros((nx-1, n-1, 3)))
         size = (nx-1) * (n-1)
         self.add_param('circulations', val=numpy.zeros((size)))
         self.add_param('alpha', val=3.)
         self.add_param('v', val=10.)
         self.add_param('rho', val=3.)
-        self.add_param('widths', val=numpy.zeros((nx-1, n-1)))
         self.add_output('sec_forces', val=numpy.zeros((nx-1, n-1, 3), dtype="complex"))
 
         self.mtx = numpy.zeros((size, size, 3), dtype="complex")

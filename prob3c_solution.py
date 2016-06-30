@@ -1,7 +1,6 @@
 from __future__ import division
 import numpy
 import sys
-import time
 
 from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, Newton, ScipyGMRES, LinearGaussSeidel, NLGaussSeidel, SqliteRecorder, DirectSolver
 from geometry import GeometryMesh, gen_crm_mesh
@@ -88,8 +87,8 @@ coupled.add('loads',
 coupled.nl_solver = HybridGSNewton()
 coupled.nl_solver.nlgs.options['iprint'] = 1
 coupled.nl_solver.nlgs.options['maxiter'] = 5
-coupled.nl_solver.newton.options['atol'] = 1e-6
-coupled.nl_solver.newton.options['rtol'] = 1e-6
+coupled.nl_solver.newton.options['atol'] = 1e-5
+coupled.nl_solver.newton.options['rtol'] = 1e-5
 coupled.nl_solver.newton.options['iprint'] = 1
 
 # Krylov Solver - LNGS preconditioning
@@ -153,5 +152,3 @@ prob.setup()
 
 # always need to run before you compute derivatives!
 prob.run()
-
-print "runtime: ", run_time

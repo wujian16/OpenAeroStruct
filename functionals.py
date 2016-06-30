@@ -22,7 +22,7 @@ class FunctionalBreguetRange(Component):
         self.a = a
         self.R = R
         self.M = M
-        
+
         self.deriv_options['type'] = 'cs'
         self.deriv_options['form'] = 'central'
         #self.deriv_options['extra_check_partials_form'] = "central"

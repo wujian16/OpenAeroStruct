@@ -90,6 +90,9 @@ class Display(object):
             self.ax5 = plt.subplot2grid((4, 8), (3, 4), colspan=4)
 
     def load_db(self):
+        """ Loads data from the database file from OpenMDAO.
+        Checks to see if there is data bout the wing, tube, or both. """
+
         self.db = sqlitedict.SqliteDict(self.db_name, 'openmdao')
         self.twist = []
         self.mesh = []
@@ -161,6 +164,7 @@ class Display(object):
 
         self.num_iters = numpy.max([len(self.mesh) - 1, 1])
 
+        # Compute lift properties if the wing is shown
         if self.show_wing:
 
             for i in range(self.num_iters + 1):
@@ -184,6 +188,7 @@ class Display(object):
 
                 lift_area = numpy.sum(lift * (span[1:] - span[:-1]))
 
+                # Elliptical lift distribution, used for comparison
                 lift_ell = 4 * lift_area / numpy.pi * \
                     numpy.sqrt(1 - (2*span)**2)
 
@@ -193,17 +198,17 @@ class Display(object):
                 wingspan = numpy.abs(m_vals[0, -1, 1] - m_vals[0, 0, 1])
                 self.AR.append(wingspan**2 / self.S_ref[i])
 
-            # recenter def_mesh points for better viewing
+            # Recenter def_mesh points for better viewing
             for i in range(self.num_iters + 1):
                 center = numpy.mean(numpy.mean(self.mesh[i], axis=0), axis=0)
                 self.def_mesh[i] = self.def_mesh[i] - center
 
-        # recenter mesh points for better viewing
+        # Recenter mesh points for better viewing
         for i in range(self.num_iters + 1):
             center = numpy.mean(numpy.mean(self.mesh[i], axis=0), axis=0)
             self.mesh[i] = self.mesh[i] - center
 
-
+        # Find min and max of twist, lift, thickness, and von mises to set the axes later
         if self.show_wing:
             self.min_twist, self.max_twist = numpy.min(self.twist), numpy.max(self.twist)
             diff = (self.max_twist - self.min_twist) * 0.05
@@ -226,6 +231,9 @@ class Display(object):
             self.max_vm += diff
 
     def plot_sides(self):
+        """ Plot line graphs of twist and lift, thickness and von mises, or all four,
+        depending on which type of database file is loaded. """
+
         m_vals = self.mesh[self.curr_pos]
         span = m_vals[0, :, 1] / m_vals[0, -1, 1]
         span_diff = (m_vals[0, :-1, 1] + m_vals[0, 1:, 1])/2 / m_vals[0, -1, 1]
@@ -345,10 +353,6 @@ class Display(object):
         obj_val = round_to_n(self.obj[self.curr_pos], 7)
         self.ax.text2D(.55, .05, self.obj_key + ': {}'.format(obj_val),
             transform=self.ax.transAxes, color='k')
-        if self.show_wing and not self.show_tube:
-            span_eff = self.CL[self.curr_pos]**2 / numpy.pi / self.AR[self.curr_pos] / obj_val
-            self.ax.text2D(.55, .0, 'e: {}'.format(span_eff),
-                transform=self.ax.transAxes, color='k')
 
         self.ax.view_init(elev=el, azim=az)  # Reproduce view
         self.ax.dist = dist

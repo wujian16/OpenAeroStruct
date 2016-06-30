@@ -8,8 +8,6 @@ from openmdao.api import Component
 
 from b_spline import get_bspline_mtx
 from crm_data import crm_base_mesh
-from b_spline import get_bspline_mtx
-
 
 def rotate(mesh, thetas):
     """ Computes rotation matricies given mesh and rotation angles in degress """
@@ -102,7 +100,6 @@ def taper(mesh, taper_ratio):
     num_x, num_y, _ = mesh.shape
     ny2 = int((num_y+1)/2)
 
-    tele = te - le
     center_chord = .5 * te + .5 * le
     span = le[-1, 1] - le[0, 1]
     taper = numpy.linspace(1, taper_ratio, ny2)[::-1]
@@ -210,7 +207,7 @@ def add_chordwise_panels(mesh, num_x):
 
     return new_mesh
 
-def gen_mesh(num_x, num_y, span, chord, amt_of_cos=0.):
+def gen_mesh(num_x, num_y, span, chord, cosine_spacing=0.):
     mesh = numpy.zeros((num_x, num_y, 3))
     ny2 = (num_y + 1) / 2
     beta = numpy.linspace(0, numpy.pi/2, ny2)
@@ -218,7 +215,7 @@ def gen_mesh(num_x, num_y, span, chord, amt_of_cos=0.):
     # mixed spacing with w as a weighting factor
     cosine = .5 * numpy.cos(beta) #  cosine spacing
     uniform = numpy.linspace(0, .5, ny2)[::-1] #  uniform spacing
-    half_wing = cosine * amt_of_cos + (1 - amt_of_cos) * uniform
+    half_wing = cosine * cosine_spacing + (1 - cosine_spacing) * uniform
     full_wing = numpy.hstack((-half_wing[:-1], half_wing[::-1])) * span
 
     for ind_x in xrange(num_x):

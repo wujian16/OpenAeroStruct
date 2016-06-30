@@ -40,8 +40,6 @@ class TransferDisplacements(Component):
         for ind in xrange(num_y):
             dx, dy, dz, rx, ry, rz = disp[ind, :]
 
-            dx, dy, dz, rx, ry, rz = 0, 0, 0, 0, 0, 0
-
             # 1 eye from the axis rotation matrices
             # -3 eye from subtracting Smesh three times
             T = -2 * numpy.eye(3, dtype="complex")

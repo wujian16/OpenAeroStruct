@@ -1,19 +1,29 @@
-""" Example script to run struct-only optimization """
+""" Example script to run structural-only optimization.
+Call as `python run_spatialbeam.py 0` to run a single analysis, or
+call as `python run_spatialbeam.py 1` to perform optimization. """
 
 from __future__ import division
 import numpy
 import sys
-import time
+from time import time
 
-from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, SqliteRecorder, pyOptSparseDriver
+from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, SqliteRecorder
 from geometry import GeometryMesh, gen_crm_mesh, LinearInterp
 from spatialbeam_orig import SpatialBeamStates, SpatialBeamFunctionals, radii
 from materials import MaterialsTube
 from openmdao.devtools.partition_tree_n2 import view_tree
 
-# Create the mesh with 4 inboard points and 6 outboard points
-mesh = gen_crm_mesh(n_points_inboard=4, n_points_outboard=6)
-# mesh = gen_crm_mesh(n_points_inboard=2, n_points_outboard=2)
+try:
+    from openmdao.api import pyOptSparseDriver
+    SNOPT = True
+except:
+    SNOPT = False
+
+
+# Create the mesh with 2 inboard points and 3 outboard points.
+# This will be mirrored to produce a mesh with 7 spanwise points,
+# or 6 spanwise panels
+mesh = gen_crm_mesh(n_points_inboard=2, n_points_outboard=3)
 
 num_y = mesh.shape[1]
 num_twist = 5
@@ -62,9 +72,8 @@ prob.root = root
 prob.driver = ScipyOptimizer()
 prob.driver.options['optimizer'] = 'SLSQP'
 prob.driver.options['disp'] = True
-# prob.driver.options['tol'] = 1.0e-12
 
-if 1:
+if SNOPT:
     prob.driver = pyOptSparseDriver()
     prob.driver.options['optimizer'] = "SNOPT"
     prob.driver.opt_settings = {'Major optimality tolerance': 1.0e-8,
@@ -76,27 +85,18 @@ prob.driver.add_desvar('t',
 prob.driver.add_objective('energy')
 prob.driver.add_constraint('weight', upper=1e5)
 
-# prob.root.deriv_options['type'] = 'cs'
-
 prob.driver.add_recorder(SqliteRecorder('spatialbeam.db'))
 
 prob.setup()
 view_tree(prob, outfile="spatialbeam.html", show_browser=False)
 
+st = time()
+prob.run_once()
 if sys.argv[1] == '0':
-    prob.check_partial_derivatives(compact_print=True)
-    # prob.check_total_derivatives()
-    prob.run_once()
-    print
-    print prob['A']
-    print prob['Iy']
-    print prob['Iz']
-    print prob['J']
-    print
-    print prob['disp']
+    # Uncomment this line to check derivatives.
+    # prob.check_partial_derivatives(compact_print=True)
+    pass
 elif sys.argv[1] == '1':
-
-    st = time.time()
     prob.run()
-    print "weight", prob['weight']
-    print "run time", time.time()-st
+print "weight", prob['weight']
+print "run time", time()-st
