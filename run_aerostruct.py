@@ -26,7 +26,7 @@ if 0:
     num_twist = 5
 else:
     num_x = 2
-    num_y = 5
+    num_y = 11
     span = 10.
     chord = 1.
     amt_of_cos = 1.
@@ -34,7 +34,7 @@ else:
     num_twist = numpy.max([int((num_y - 1) / 5), 5])
 
 r = radii(mesh)
-t = r/10
+t = r/10 *10
 
 
 
@@ -138,9 +138,9 @@ prob.driver.add_desvar('twist',lower= -10.,
 #prob.driver.add_desvar('alpha', lower=-10., upper=10., scaler=1000)
 prob.driver.add_desvar('t',
                        lower= 0.003,
-                       upper= 0.25, scaler=1000)
+                       upper= 0.25, scaler=100000)
 prob.driver.add_objective('fuelburn')
-prob.driver.add_constraint('failure', upper=0.0)
+prob.driver.add_constraint('failure', upper=0.0, scaler=1000)
 prob.driver.add_constraint('eq_con', equals=0.0)
 
 prob.driver.add_recorder(SqliteRecorder('aerostruct.db'))

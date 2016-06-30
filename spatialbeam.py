@@ -5,6 +5,8 @@ import numpy
 
 from openmdao.api import Component, Group
 from scipy.linalg import lu_factor, lu_solve
+from scipy.sparse.linalg import gmres, LinearOperator, splu
+import scipy.sparse as sp
 try:
     import lib
     fortran_flag = True
@@ -207,10 +209,40 @@ class SpatialBeamFEM(Component):
                                 self.E, self.G, self.x_gl, self.T,
                                 self.K_elem, self.S_a, self.S_t, self.S_y, self.S_z, self.T_elem,
                                 self.const2, self.const_y, self.const_z, self.n, self.size, self.mtx, self.rhs)
+        #resids = self.mtx.dot(unknowns['disp_aug']) - self.rhs
+        #print '                         solve1: ', numpy.linalg.norm(resids)
 
-        unknowns['disp_aug'] = numpy.linalg.solve(self.mtx, self.rhs)
+        sparse_mtx = sp.csc_matrix(self.mtx)
+        inv = splu(sparse_mtx)
+
+        if 1:
+            #lu, piv = lu_factor(self.mtx)
+            #precon = lambda b: lu_solve((lu, piv), b)
+            precon = inv.solve
+            def cb(res):
+                print numpy.linalg.norm(res)
+            linop = LinearOperator(self.mtx.shape, precon)
+            unknowns['disp_aug'] = gmres(self.mtx, self.rhs, M=linop,
+                                        x0=unknowns['disp_aug'],
+                                        tol=1e-25, callback=cb)[0]
+        else:
+            lu, piv = lu_factor(self.mtx)
+            matvec = lambda b: self.mtx.dot(lu_solve((lu, piv), b))
+            def cb(res):
+                print numpy.linalg.norm(res)
+            linop = LinearOperator(self.mtx.shape, matvec)
+            sol = gmres(linop, self.rhs,
+                        x0=unknowns['disp_aug'],
+                        tol=1e-15, callback=cb)[0]
+            unknowns['disp_aug'] = lu_solve((lu, piv), sol)
+
+
+        #def precon(b):
+        #    return lu_solve((lu, piv), b)
+
+        #unknowns['disp_aug'] = numpy.linalg.solve(self.mtx, self.rhs)
         resids = self.mtx.dot(unknowns['disp_aug']) - self.rhs
-        print '                         solve: ', numpy.linalg.norm(resids)
+        print '                         solve2: ', numpy.linalg.norm(resids)
 
     def apply_nonlinear(self, params, unknowns, resids):
         if fortran_flag:
@@ -228,8 +260,8 @@ class SpatialBeamFEM(Component):
                                 self.K_elem, self.S_a, self.S_t, self.S_y, self.S_z, self.T_elem,
                                 self.const2, self.const_y, self.const_z, self.n, self.size, self.mtx, self.rhs)
 
-        resids['disp_aug'] = self.mtx.dot(unknowns['disp_aug']) - self.rhs
-        print '                         apply: ', numpy.linalg.norm(resids['disp_aug'])
+        #resids['disp_aug'] = self.mtx.dot(unknowns['disp_aug']) - self.rhs
+        #print '                         apply: ', numpy.linalg.norm(resids['disp_aug'])
 
     def linearize(self, params, unknowns, resids):
         """ Jacobian for disp."""
@@ -253,12 +285,24 @@ class SpatialBeamFEM(Component):
         if mode == 'fwd':
             sol_vec, rhs_vec = self.dumat, self.drmat
             t = 0
+            mat = self.mtx
         else:
             sol_vec, rhs_vec = self.drmat, self.dumat
             t = 1
+            mat = self.mtx.T
+
+        if 0:
+            lu, piv = lu_factor(self.mtx)
+            precon = lambda b: lu_solve((lu, piv), b)
+            def cb(res):
+                print numpy.linalg.norm(res)
+            linop = LinearOperator(self.mtx.shape, precon)
 
         for voi in vois:
             sol_vec[voi].vec[:] = lu_solve(self.lup, rhs_vec[voi].vec, trans=t)
+            #sol_vec[voi].vec[:] = gmres(self.mtx, rhs_vec[voi].vec, M=linop,
+            #                            x0=sol_vec[voi].vec[:],
+            #                            tol=1e-16, callback=cb)[0]
 
 
 

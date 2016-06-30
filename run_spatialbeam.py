@@ -5,7 +5,7 @@ import numpy
 import sys
 import time
 
-from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, SqliteRecorder
+from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, SqliteRecorder, pyOptSparseDriver
 from geometry import GeometryMesh, gen_crm_mesh, LinearInterp
 from spatialbeam_orig import SpatialBeamStates, SpatialBeamFunctionals, radii
 from materials import MaterialsTube
@@ -64,9 +64,15 @@ prob.driver.options['optimizer'] = 'SLSQP'
 prob.driver.options['disp'] = True
 # prob.driver.options['tol'] = 1.0e-12
 
+if 1:
+    prob.driver = pyOptSparseDriver()
+    prob.driver.options['optimizer'] = "SNOPT"
+    prob.driver.opt_settings = {'Major optimality tolerance': 1.0e-8,
+                                'Major feasibility tolerance': 1.0e-8}
+
 prob.driver.add_desvar('t',
-                       lower=numpy.ones((num_y)) * 0.003,
-                       upper=numpy.ones((num_y)) * 0.25)
+                       lower= 0.003,
+                       upper= 0.25, scaler=1000)
 prob.driver.add_objective('energy')
 prob.driver.add_constraint('weight', upper=1e5)
 
