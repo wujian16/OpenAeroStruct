@@ -5,8 +5,8 @@ import numpy
 import sys
 import time
 
-from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, Newton, ScipyGMRES, LinearGaussSeidel, NLGaussSeidel, SqliteRecorder, profile
-from geometry import GeometryMesh, gen_crm_mesh
+from openmdao.api import IndepVarComp, Problem, Group, ScipyOptimizer, Newton, ScipyGMRES, LinearGaussSeidel, NLGaussSeidel, SqliteRecorder, profile, pyOptSparseDriver
+from geometry import GeometryMesh, gen_crm_mesh, gen_mesh
 from transfer import TransferDisplacements, TransferLoads
 from weissinger import WeissingerStates, WeissingerFunctionals
 from spatialbeam import SpatialBeamStates, SpatialBeamFunctionals, radii
@@ -16,15 +16,27 @@ from functionals import FunctionalBreguetRange, FunctionalEquilibrium
 from openmdao.devtools.partition_tree_n2 import view_tree
 from gs_newton import HybridGSNewton
 
-# Create the mesh with 2 inboard points and 3 outboard points
-mesh = gen_crm_mesh(n_points_inboard=2, n_points_outboard=3)
-num_x, num_y, _ = mesh.shape
-num_twist = 5
+# Define the aircraft properties
+execfile('CRM.py')
+
+if 0:
+    # Create the mesh with 2 inboard points and 3 outboard points
+    mesh = gen_crm_mesh(n_points_inboard=2, n_points_outboard=3)
+    num_x, num_y, _ = mesh.shape
+    num_twist = 5
+else:
+    num_x = 2
+    num_y = 5
+    span = 10.
+    chord = 1.
+    amt_of_cos = 1.
+    mesh = gen_mesh(num_x, num_y, span, chord, amt_of_cos)
+    num_twist = numpy.max([int((num_y - 1) / 5), 5])
+
 r = radii(mesh)
 t = r/10
 
-# Define the aircraft properties
-execfile('CRM.py')
+
 
 # Define the material properties
 execfile('aluminum.py')
@@ -76,17 +88,19 @@ coupled.ln_solver.preconditioner = LinearGaussSeidel()
 coupled.weissingerstates.ln_solver = LinearGaussSeidel()
 coupled.spatialbeamstates.ln_solver = LinearGaussSeidel()
 
-coupled.nl_solver = NLGaussSeidel()   ### Uncomment this out to use NLGS
-coupled.nl_solver.options['iprint'] = 1
-coupled.nl_solver.options['atol'] = 1e-5
-coupled.nl_solver.options['rtol'] = 1e-12
+if 1:
+    coupled.nl_solver = NLGaussSeidel()   ### Uncomment this out to use NLGS
+    coupled.nl_solver.options['iprint'] = 1
+    coupled.nl_solver.options['atol'] = 1e-10
+    coupled.nl_solver.options['rtol'] = 1e-12
 
-coupled.nl_solver = HybridGSNewton()   ### Uncomment this out to use Hybrid GS Newton
-coupled.nl_solver.nlgs.options['iprint'] = 1
-coupled.nl_solver.nlgs.options['maxiter'] = 5
-coupled.nl_solver.newton.options['atol'] = 1e-7
-coupled.nl_solver.newton.options['rtol'] = 1e-7
-coupled.nl_solver.newton.options['iprint'] = 1
+if 0:
+    coupled.nl_solver = HybridGSNewton()   ### Uncomment this out to use Hybrid GS Newton
+    coupled.nl_solver.nlgs.options['iprint'] = 1
+    coupled.nl_solver.nlgs.options['maxiter'] = 5
+    coupled.nl_solver.newton.options['atol'] = 1e-7
+    coupled.nl_solver.newton.options['rtol'] = 1e-7
+    coupled.nl_solver.newton.options['iprint'] = 1
 
 root.add('coupled',
          coupled,
@@ -113,7 +127,7 @@ prob.driver.options['optimizer'] = 'SLSQP'
 prob.driver.options['disp'] = True
 prob.driver.options['tol'] = 1.0e-8
 
-if 0:
+if 1:
     prob.driver = pyOptSparseDriver()
     prob.driver.options['optimizer'] = "SNOPT"
     prob.driver.opt_settings = {'Major optimality tolerance': 1.0e-8,

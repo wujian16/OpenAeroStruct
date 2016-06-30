@@ -11,6 +11,8 @@ try:
 except:
     fortran_flag = False
 
+from weissinger import view_mat
+
 def norm(vec):
     return numpy.sqrt(numpy.sum(vec**2))
 
@@ -121,16 +123,16 @@ class SpatialBeamFEM(Component):
         self.add_param('Iy', val=numpy.zeros((n - 1)))
         self.add_param('Iz', val=numpy.zeros((n - 1)))
         self.add_param('J', val=numpy.zeros((n - 1)))
-        self.add_param('mesh', val=numpy.zeros((2, n, 3)))
+        self.add_param('mesh', val=numpy.zeros((2, n, 3), dtype="complex"))
 
-        self.add_param('loads', val=numpy.zeros((n, 6)))
+        self.add_param('loads', val=numpy.zeros((n, 6), dtype="complex"))
 
         self.add_state('disp_aug', val=numpy.zeros((size)), dtype="complex")
 
         # self.deriv_options['type'] = 'cs'
-        self.deriv_options['form'] = 'central'
+        # self.deriv_options['form'] = 'central'
         #self.deriv_options['extra_check_partials_form'] = "central"
-        self.deriv_options['linearize'] = True # only for circulations
+        # self.deriv_options['linearize'] = True # only for circulations
 
         self.arange = numpy.arange(6*n)
 
@@ -207,6 +209,8 @@ class SpatialBeamFEM(Component):
                                 self.const2, self.const_y, self.const_z, self.n, self.size, self.mtx, self.rhs)
 
         unknowns['disp_aug'] = numpy.linalg.solve(self.mtx, self.rhs)
+        resids = self.mtx.dot(unknowns['disp_aug']) - self.rhs
+        print '                         solve: ', numpy.linalg.norm(resids)
 
     def apply_nonlinear(self, params, unknowns, resids):
         if fortran_flag:
@@ -224,8 +228,8 @@ class SpatialBeamFEM(Component):
                                 self.K_elem, self.S_a, self.S_t, self.S_y, self.S_z, self.T_elem,
                                 self.const2, self.const_y, self.const_z, self.n, self.size, self.mtx, self.rhs)
 
-        disp_aug = unknowns['disp_aug']
-        resids['disp_aug'] = self.mtx.dot(disp_aug) - self.rhs
+        resids['disp_aug'] = self.mtx.dot(unknowns['disp_aug']) - self.rhs
+        print '                         apply: ', numpy.linalg.norm(resids['disp_aug'])
 
     def linearize(self, params, unknowns, resids):
         """ Jacobian for disp."""
@@ -370,7 +374,7 @@ class SpatialBeamVonMisesTube(Component):
         self.add_param('r', val=numpy.zeros((n-1)))
         self.add_param('disp', val=numpy.zeros((n, 6)))
 
-        self.add_output('vonmises', val=numpy.zeros((n-1, 2)))
+        self.add_output('vonmises', val=numpy.zeros((n-1, 2), dtype="complex"))
 
         self.deriv_options['type'] = 'cs'
         self.deriv_options['form'] = 'central'

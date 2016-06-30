@@ -19,7 +19,7 @@ class TransferDisplacements(Component):
         self.add_output('def_mesh', val=numpy.zeros((nx, n, 3)))
 
         self.deriv_options['type'] = 'cs'
-        self.deriv_options['form'] = 'central'
+        # self.deriv_options['form'] = 'central'
         #self.deriv_options['extra_check_partials_form'] = "central"
 
     def solve_nonlinear(self, params, unknowns, resids):
@@ -39,6 +39,8 @@ class TransferDisplacements(Component):
         cos, sin = numpy.cos, numpy.sin
         for ind in xrange(num_y):
             dx, dy, dz, rx, ry, rz = disp[ind, :]
+
+            dx, dy, dz, rx, ry, rz = 0, 0, 0, 0, 0, 0
 
             # 1 eye from the axis rotation matrices
             # -3 eye from subtracting Smesh three times

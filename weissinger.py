@@ -325,8 +325,8 @@ class WeissingerCirculations(Component):
         size = (n-1) * (nx-1)
         self.add_state('circulations', val=numpy.zeros((size)))
 
-        self.deriv_options['form'] = 'central'
-        self.deriv_options['linearize'] = True # only for circulations
+        #self.deriv_options['form'] = 'central'
+        #self.deriv_options['linearize'] = True # only for circulations
 
         self.num_y = n
         self.AIC_mtx = numpy.zeros((size, size, 3), dtype="complex")
@@ -351,11 +351,12 @@ class WeissingerCirculations(Component):
         self._assemble_system(params)
         # obtain incompressible circulations
         unknowns['circulations'] = numpy.linalg.solve(self.mtx, self.rhs)
-        a = 295.4 # hardcoded speed of sound
-        M = params['v'] / a
-        beta = numpy.sqrt(1 - M**2)
+        resids = self.mtx.dot(unknowns['circulations']) - self.rhs
+        #a = 295.4 # hardcoded speed of sound
+        #M = params['v'] / a
+        #beta = numpy.sqrt(1 - M**2)
         # obtain compressible circulations
-        unknowns['circulations'] /= beta
+        #unknowns['circulations'] /= beta
 
     def apply_nonlinear(self, params, unknowns, resids):
         self._assemble_system(params)
