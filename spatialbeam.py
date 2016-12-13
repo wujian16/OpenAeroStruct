@@ -34,13 +34,27 @@ def radii(mesh, t_c=0.15):
     chords = 0.5 * chords[:-1] + 0.5 * chords[1:]
     return t_c * chords
 
+def order(evalues, evectors):
+	idx = numpy.imag(evalues).argsort()[::1]
+	eigenvalues = evalues[idx]
+	eigenvectors = evectors[:,idx]
+	return eigenvalues, eigenvectors
+
+def Eig_matrix(M_array, K_array):
+	M = numpy.asmatrix(M_array)
+	K = numpy.asmatrix(K_array)
+	M_inv = numpy.linalg.inv(M)
+	return M_inv*K
+
 
 def _assemble_system(nodes, A, J, Iy, Iz, loads,
                      K_a, K_t, K_y, K_z,
+                     M_a, M_t, M_y, M_z,
                      elem_IDs, cons,
                      E, G, x_gl, T,
-                     K_elem, S_a, S_t, S_y, S_z, T_elem,
-                     const2, const_y, const_z, n, size, K, rhs):
+                     K_elem, M_elem, mrho, S_a, S_t, S_y, S_z, T_elem,
+                     const_K, const_y, const_z, const_M, const_yy, const_zz,
+                     n, size, K, M, rhs):
 
     """
     Assemble the structural stiffness matrix based on 6 degrees of freedom
@@ -72,7 +86,7 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
                                      elem_IDs+1, cons,
                                      E_vec, G_vec, x_gl, T,
                                      K_elem, S_a, S_t, S_y, S_z, T_elem,
-                                     const2, const_y, const_z, loads)
+                                     const_K, const_y, const_z, loads)
 
     # Dense Python
     else:
@@ -80,6 +94,7 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
         num_nodes = num_elems + 1
 
         K[:] = 0.
+        M[:] = 0.
 
         # Loop over each element
         for ielem in xrange(num_elems):
@@ -104,8 +119,8 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
             EIy_L3 = E_vec[ielem] * Iy[ielem] / L**3
             EIz_L3 = E_vec[ielem] * Iz[ielem] / L**3
 
-            K_a[:, :] = EA_L * const2
-            K_t[:, :] = GJ_L * const2
+            K_a[:, :] = EA_L * const_K
+            K_t[:, :] = GJ_L * const_K
 
             K_y[:, :] = EIy_L3 * const_y
             K_y[1, :] *= L
@@ -135,6 +150,41 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
             K[6*in1:6*in1+6, 6*in0:6*in0+6] += res[6:, :6]
             K[6*in0:6*in0+6, 6*in1:6*in1+6] += res[:6, 6:]
             K[6*in1:6*in1+6, 6*in1:6*in1+6] += res[6:, 6:]
+
+            ###############
+            # Mass matrix #
+            ###############
+            mrhoAL = mrho * A[ielem] * L
+            mrhoAL = 0.75 * L
+            mrhoJL = mrho * J[ielem] * L	# (J = Iy + Iz)
+            mrhoJL = 0.047 * L	# (J = Iy + Iz)
+            M_a[:, :] = mrhoAL * const_M
+            M_t[:, :] = mrhoJL * const_M
+
+            M_y[:, :] = mrhoAL * const_yy / 420
+            M_y[1, :] *= L
+            M_y[3, :] *= L
+            M_y[:, 1] *= L
+            M_y[:, 3] *= L
+
+            M_z[:, :] = mrhoAL * const_zz / 420
+            M_z[1, :] *= L
+            M_z[3, :] *= L
+            M_z[:, 1] *= L
+            M_z[:, 3] *= L
+
+            M_elem[:] = 0
+            M_elem += S_a.T.dot(M_a).dot(S_a)
+            M_elem += S_t.T.dot(M_t).dot(S_t)
+            M_elem += S_y.T.dot(M_y).dot(S_y)
+            M_elem += S_z.T.dot(M_z).dot(S_z)
+
+            res = T_elem.T.dot(M_elem).dot(T_elem)
+
+            M[6*in0:6*in0+6, 6*in0:6*in0+6] += res[:6, :6]
+            M[6*in1:6*in1+6, 6*in0:6*in0+6] += res[6:, :6]
+            M[6*in0:6*in0+6, 6*in1:6*in1+6] += res[:6, 6:]
+            M[6*in1:6*in1+6, 6*in1:6*in1+6] += res[6:, 6:]
 
         # Include a scaled identity matrix in the rows and columns
         # corresponding to the structural constraints
@@ -214,7 +264,7 @@ class SpatialBeamFEM(Component):
         elem_IDs[:, 1] = arange + 1
         self.elem_IDs = elem_IDs
 
-        self.const2 = numpy.array([
+        self.const_K = numpy.array([
             [1, -1],
             [-1, 1],
         ], dtype='complex')
@@ -233,19 +283,39 @@ class SpatialBeamFEM(Component):
         self.x_gl = numpy.array([1, 0, 0], dtype='complex')
 
         self.K_elem = numpy.zeros((12, 12), dtype='complex')
+        self.M_elem = numpy.zeros((12, 12), dtype='complex')
         self.T_elem = numpy.zeros((12, 12), dtype='complex')
         self.T = numpy.zeros((3, 3), dtype='complex')
 
         num_nodes = self.ny - 1
         num_cons = 1
 
+        # Stiffness matrix submatrices
         self.K = numpy.zeros((size, size), dtype='complex')
-        self.rhs = numpy.zeros(size, dtype='complex')
 
         self.K_a = numpy.zeros((2, 2), dtype='complex')
         self.K_t = numpy.zeros((2, 2), dtype='complex')
         self.K_y = numpy.zeros((4, 4), dtype='complex')
         self.K_z = numpy.zeros((4, 4), dtype='complex')
+
+        # Mass matrix submatrices
+        self.M = numpy.zeros((size, size), dtype='complex')
+
+        self.const_M = numpy.array([[1/3, 1/6],
+                                   [1/6, 1/3],], dtype='complex')
+        self.const_yy = numpy.array([[156,-22, 54, 13],
+                                     [-22,  4,-13, -3],
+                                     [ 54,-13,156, 22],
+                                     [ 13, -3, 22,  4],], dtype='complex')
+        self.const_zz = numpy.array([[156, 22, 54,-13],
+                                     [ 22,  4, 13, -3],
+                                     [ 54, 13,156,-22],
+                                     [-13, -3,-22,  4],], dtype='complex')
+
+        self.M_a = numpy.zeros((2, 2), dtype='complex')
+        self.M_t = numpy.zeros((2, 2), dtype='complex')
+        self.M_y = numpy.zeros((4, 4), dtype='complex')
+        self.M_z = numpy.zeros((4, 4), dtype='complex')
 
         self.S_a = numpy.zeros((2, 12), dtype='complex')
         self.S_a[(0, 1), (0, 6)] = 1.
@@ -259,8 +329,11 @@ class SpatialBeamFEM(Component):
         self.S_z = numpy.zeros((4, 12), dtype='complex')
         self.S_z[(0, 1, 2, 3), (1, 5, 7, 11)] = 1.
 
+        self.rhs = numpy.zeros(size, dtype='complex')
+
     def solve_nonlinear(self, params, unknowns, resids):
         name = self.surface['name']
+        mrho = self.surface['mrho']
 
         # Find constrained nodes based on closeness to specified cg point
         nodes = params['nodes']
@@ -274,29 +347,36 @@ class SpatialBeamFEM(Component):
             _assemble_system(params['nodes'],
                              params['A'], params['J'], params['Iy'],
                              params['Iz'], loads, self.K_a, self.K_t,
-                             self.K_y, self.K_z, self.elem_IDs, self.cons,
+                             self.K_y, self.K_z, self.M_a, self.M_t,
+                             self.M_y, self.M_z, self.elem_IDs, self.cons,
                              self.E, self.G, self.x_gl, self.T, self.K_elem,
+                             self.M_elem, mrho,
                              self.S_a, self.S_t, self.S_y, self.S_z,
-                             self.T_elem, self.const2, self.const_y,
-                             self.const_z, self.ny, self.size,
-                             self.K, self.rhs)
+                             self.T_elem, self.const_K, self.const_y,
+                             self.const_z, self.const_M, self.const_yy,
+                             self.const_zz, self.ny, self.size,
+                             self.K, self.M, self.rhs)
 
         unknowns['disp_aug'] = self.x
 
 
     def apply_nonlinear(self, params, unknowns, resids):
+        # Move these names instances into the init
         name = self.surface['name']
+        mrho = self.surface['mrho']
         loads = params['loads']
         self.K, _, self.rhs = \
             _assemble_system(params['nodes'],
                              params['A'], params['J'], params['Iy'],
                              params['Iz'], loads, self.K_a, self.K_t,
-                             self.K_y, self.K_z, self.elem_IDs, self.cons,
+                             self.K_y, self.K_z, self.M_a, self.M_t,
+                             self.M_y, self.M_z, self.elem_IDs, self.cons,
                              self.E, self.G, self.x_gl, self.T, self.K_elem,
+                             self.M_elem, mrho,
                              self.S_a, self.S_t, self.S_y, self.S_z,
-                             self.T_elem, self.const2, self.const_y,
-                             self.const_z, self.ny, self.size,
-                             self.K, self.rhs)
+                             self.T_elem, self.const_K, self.const_y,
+                             self.const_z, self.const_M, self.const_yy, self.const_zz,
+                             self.ny, self.size, self.K, self.M, self.rhs)
 
         disp_aug = unknowns['disp_aug']
         resids['disp_aug'] = self.K.dot(disp_aug) - self.rhs
@@ -328,7 +408,7 @@ class SpatialBeamFEM(Component):
     #                                  self.K_y, self.K_z, self.elem_IDs+1, self.cons,
     #                                  self.E*numpy.ones(num_elems), self.G*numpy.ones(num_elems), self.x_gl, self.T, self.K_elem,
     #                                  self.S_a, self.S_t, self.S_y, self.S_z,
-    #                                  self.T_elem, self.const2, self.const_y,
+    #                                  self.T_elem, self.const_K, self.const_y,
     #                                  self.const_z, loads, loadsd)
     #
     #     Kb = numpy.random.random_sample(self.K.shape)
@@ -343,7 +423,7 @@ class SpatialBeamFEM(Component):
     #                                  self.K_y, self.K_z, self.elem_IDs+1, self.cons,
     #                                  self.E*numpy.ones(num_elems), self.G*numpy.ones(num_elems), self.x_gl, self.T, self.K_elem,
     #                                  self.S_a, self.S_t, self.S_y, self.S_z,
-    #                                  self.T_elem, self.const2, self.const_y,
+    #                                  self.T_elem, self.const_K, self.const_y,
     #                                  self.const_z, loads, self.K, Kb, self.x, xb)
     #
     #
@@ -370,7 +450,7 @@ class SpatialBeamFEM(Component):
     #                                      self.K_y, self.K_z, self.elem_IDs+1, self.cons,
     #                                      self.E*numpy.ones(num_elems), self.G*numpy.ones(num_elems), self.x_gl, self.T, self.K_elem,
     #                                      self.S_a, self.S_t, self.S_y, self.S_z,
-    #                                      self.T_elem, self.const2, self.const_y,
+    #                                      self.T_elem, self.const_K, self.const_y,
     #                                      self.const_z, loads, dparams['loads'])
     #
     #         dresids['disp_aug'] += xd
@@ -394,7 +474,7 @@ class SpatialBeamFEM(Component):
     #                                      self.K_y, self.K_z, self.elem_IDs+1, self.cons,
     #                                      self.E*numpy.ones(num_elems), self.G*numpy.ones(num_elems), self.x_gl, self.T, self.K_elem,
     #                                      self.S_a, self.S_t, self.S_y, self.S_z,
-    #                                      self.T_elem, self.const2, self.const_y,
+    #                                      self.T_elem, self.const_K, self.const_y,
     #                                      self.const_z, loads, self.K, numpy.zeros(self.K.shape), unknowns['disp_aug'].copy(), seeds)
     #
     #         dparams['nodes'] += nodesb
