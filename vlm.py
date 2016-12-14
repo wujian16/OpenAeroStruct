@@ -148,6 +148,18 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
         mesh = params[name_+'def_mesh']
         bpts = params[name_+'b_pts']
 
+        # Set rotations for b_pts and c_pts due to angle of attack alpha
+        alpha = params['alpha']# * numpy.pi / 180.
+        cosa = numpy.cos(-alpha)
+        sina = numpy.sin(-alpha)
+        rot_x = numpy.array([cosa, 0, -sina])
+        rot_z = numpy.array([sina, 0,  cosa])
+
+        # for i in xrange(nx_):
+        # 	for j in xrange(ny_):
+        # 		mesh[i, j, 0] = mesh[i, j, :].dot(rot_x)
+        # 		mesh[i, j, 2] = mesh[i, j, :].dot(rot_z)
+
         # Set counters to know where to index the sub-matrix within the full mtx
         i = 0
         i_bpts = 0
@@ -323,118 +335,6 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
 
     mtx /= 4 * numpy.pi
 
-def _assemble_AIC_mtx_d(mtx, params, surfaces, skip=False):
-    """
-    Compute the aerodynamic influence coefficient matrix
-    for either solving the linear system or solving for the drag.
-
-    We use a nested for loop structure to loop through the lifting surfaces to
-    obtain the corresponding mesh, then for each mesh we again loop through
-    the lifting surfaces to obtain the collocation points used to compute
-    the horseshoe vortex influence coefficients.
-
-    This creates mtx with blocks corresponding to each lifting surface's
-    effects on other lifting surfaces. The block diagonal portions
-    correspond to each lifting surface's influencen on itself. For a single
-    lifting surface, this is the entire mtx.
-
-    Parameters
-    ----------
-    mtx[num_y-1, num_y-1, 3] : array_like
-        Aerodynamic influence coefficient (AIC) matrix, or the
-        derivative of v w.r.t. circulations.
-    params : dictionary
-        OpenMDAO params dictionary for a given aero problem
-    surfaces : dictionary
-        Dictionary containing all surfaces in an aero problem.
-    skip : boolean
-        If false, the bound vortex contributions on the collocation point
-        corresponding to the same panel are not included. Used for the drag
-        computation.
-
-    Returns
-    -------
-    mtx[tot_panels, tot_panels, 3] : array_like
-        Aerodynamic influence coefficient (AIC) matrix, or the
-        derivative of v w.r.t. circulations.
-    """
-
-    alpha = params['alpha']
-    mtx[:, :, :] = 0.0
-    cosa = numpy.cos(alpha * numpy.pi / 180.)
-    sina = numpy.sin(alpha * numpy.pi / 180.)
-    u = numpy.array([cosa, 0, sina])
-
-    i_ = 0
-    i_bpts_ = 0
-    i_panels_ = 0
-
-    # Loop over the lifting surfaces to compute their influence on the flow
-    # velocity at the collocation points
-    for surface_ in surfaces:
-
-        # Variable names with a trailing underscore correspond to the lifting
-        # surface being examined, not the collocation point
-        name_ = surface_['name']
-        nx_ = surface_['num_x']
-        ny_ = surface_['num_y']
-        n_ = nx_ * ny_
-        n_bpts_ = (nx_ - 1) * ny_
-        n_panels_ = (nx_ - 1) * (ny_ - 1)
-
-        # Obtain the lifting surface mesh in the form expected by the solver,
-        # with shape [nx_, ny_, 3]
-        mesh = params['def_mesh']
-        bpts = params['b_pts']
-
-        # Set counters to know where to index the sub-matrix within the full mtx
-        i = 0
-        i_bpts = 0
-        i_panels = 0
-
-        for surface in surfaces:
-            # These variables correspond to the collocation points
-            name = surface['name']
-            nx = surface['num_x']
-            ny = surface['num_y']
-            n = nx * ny
-            n_bpts = (nx - 1) * ny
-            n_panels = (nx - 1) * (ny - 1)
-            symmetry = surface['symmetry']
-
-            # Obtain the collocation points used to compute the AIC mtx.
-            # If setting up the AIC mtx, we use the collocation points (c_pts),
-            # but if setting up the matrix to solve for drag, we use the
-            # midpoints of the bound vortices.
-            if skip:
-                # Find the midpoints of the bound points, used in drag computations
-                pts = (params['b_pts'][:, 1:, :] + \
-                    params['b_pts'][:, :-1, :]) / 2
-            else:
-                pts = params['c_pts']
-
-            # Initialize sub-matrix to populate within full mtx
-            small_mat = numpy.zeros((n_panels, n_panels_, 3), dtype='complex')
-
-            # Dense fortran assembly for the AIC matrix
-            if fortran_flag:
-                small_mat[:, :, :] = OAS_API.oas_api.assembleaeromtx(alpha, pts, bpts,
-                                                         mesh, skip, symmetry)
-
-            # Populate the full-size matrix with these surface-surface AICs
-            mtx[i_panels:i_panels+n_panels,
-                i_panels_:i_panels_+n_panels_, :] = small_mat
-
-            i += n
-            i_bpts += n_bpts
-            i_panels += n_panels
-
-        i_ += n_
-        i_bpts_ += n_bpts_
-        i_panels_ += n_panels_
-
-    mtx /= 4 * numpy.pi
-
 
 class VLMGeometry(Component):
     """ Compute various geometric properties for VLM analysis.
@@ -461,7 +361,7 @@ class VLMGeometry(Component):
 
     """
 
-    def __init__(self, surface):
+    def __init__(self, surface, prob_dict):
         super(VLMGeometry, self).__init__()
 
         self.surface = surface
@@ -475,6 +375,7 @@ class VLMGeometry(Component):
 
         self.add_param('def_mesh', val=numpy.zeros((self.nx, self.ny, 3),
                        dtype="complex"))
+        self.add_param('alpha', val=prob_dict['alpha'])
         self.add_output('b_pts', val=numpy.zeros((self.nx-1, self.ny, 3),
                         dtype="complex"))
         self.add_output('c_pts', val=numpy.zeros((self.nx-1, self.ny-1, 3)))
@@ -487,7 +388,7 @@ class VLMGeometry(Component):
 
     def solve_nonlinear(self, params, unknowns, resids):
         name = self.surface['name']
-        mesh = params['def_mesh']
+        mesh = params['def_mesh'].copy()
 
         # Compute the bound points at 1/4 chord
         b_pts = mesh[:-1, :, :] * .75 + mesh[1:, :, :] * .25
@@ -499,8 +400,30 @@ class VLMGeometry(Component):
                 0.5 * 0.25 * mesh[:-1,  1:, :] + \
                 0.5 * 0.75 * mesh[1:,  1:, :]
 
+        # Set rotations for b_pts and c_pts due to angle of attack alpha
+        alpha = params['alpha'] * numpy.pi / 180.
+        cosa = numpy.cos(-alpha)
+        sina = numpy.sin(-alpha)
+        rot_x = numpy.array([cosa, 0, -sina])
+        rot_z = numpy.array([sina, 0,  cosa])
+
         # Compute the widths of each panel
         widths = self._get_lengths(b_pts[:, 1:, :], b_pts[:, :-1, :], 2)
+
+        for i in xrange(self.nx-1):
+        	for j in xrange(self.ny):
+        		b_pts[i, j, 0] = b_pts[i, j, :].dot(rot_x)
+        		b_pts[i, j, 2] = b_pts[i, j, :].dot(rot_z)
+
+        for i in xrange(self.nx-1):
+        	for j in xrange(self.ny-1):
+        		c_pts[i, j, 0] = c_pts[i, j, :].dot(rot_x)
+        		c_pts[i, j, 2] = c_pts[i, j, :].dot(rot_z)
+
+        for i in xrange(self.nx):
+        	for j in xrange(self.ny):
+        		mesh[i, j, 0] = mesh[i, j, :].dot(rot_x)
+        		mesh[i, j, 2] = mesh[i, j, :].dot(rot_z)
 
         # Compute the normal of each panel by taking the cross-product of
         # its diagonals. Note that this could be a nonplanar surface
@@ -645,7 +568,7 @@ class VLMCirculations(Component):
 
         # Obtain the freestream velocity direction and magnitude by taking
         # alpha into account
-        alpha = params['alpha'] * numpy.pi / 180.
+        alpha = 0.# params['alpha'] * numpy.pi / 180.
         cosa = numpy.cos(alpha)
         sina = numpy.sin(alpha)
         v_inf = params['v'] * numpy.array([cosa, 0., sina], dtype="complex")
@@ -766,7 +689,7 @@ class VLMForces(Component):
 
     def solve_nonlinear(self, params, unknowns, resids):
         circ = params['circulations']
-        alpha = params['alpha'] * numpy.pi / 180.
+        alpha = 0.# params['alpha'] * numpy.pi / 180.
         cosa = numpy.cos(alpha)
         sina = numpy.sin(alpha)
 
@@ -834,9 +757,6 @@ class VLMForces(Component):
 
         return jac
 
-    # def apply_linear(self, params, unknowns, dparams, dunknowns, dresids, mode):
-    #     print mode, dresids['sec_forces']
-
 
 class VLMLiftDrag(Component):
     """
@@ -900,7 +820,7 @@ class VLMLiftDrag(Component):
 
     def solve_nonlinear(self, params, unknowns, resids):
         name = self.surface['name']
-        alpha = params['alpha'] * numpy.pi / 180.
+        alpha = 0.#params['alpha'] * numpy.pi / 180.
         forces = params['sec_forces'].reshape(-1, 3)
         cosa = numpy.cos(alpha)
         sina = numpy.sin(alpha)
@@ -942,7 +862,7 @@ class VLMLiftDrag(Component):
         name = self.surface['name']
 
         # Analytic derivatives for sec_forces
-        alpha = params['alpha'] * numpy.pi / 180.
+        alpha = 0.# params['alpha'] * numpy.pi / 180.
         cosa = numpy.cos(alpha)
         sina = numpy.sin(alpha)
 
