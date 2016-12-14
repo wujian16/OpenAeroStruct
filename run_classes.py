@@ -298,7 +298,7 @@ class OASProblem():
             self.prob.run()
 
         # Uncomment this to check the partial derivatives of each component
-        self.prob.check_partial_derivatives(compact_print=True)
+        # self.prob.check_partial_derivatives(compact_print=True)
 
 
     def setup_struct(self):
@@ -366,6 +366,8 @@ class OASProblem():
             tmp_group.add('struct_funcs',
                      SpatialBeamFunctionals(surface),
                      promotes=['*'])
+
+            tmp_group.struct_states.ln_solver = ScipyGMRES()
 
             # Add tmp_group to the problem with the name of the surface.
             # The default is 'wing'.
@@ -564,7 +566,9 @@ class OASProblem():
             tmp_group.add('struct_states',
                      SpatialBeamStates(surface),
                      promotes=['*'])
-            tmp_group.struct_states.ln_solver = LinearGaussSeidel()
+            # tmp_group.struct_states.ln_solver = LinearGaussSeidel()
+            tmp_group.struct_states.ln_solver = ScipyGMRES()
+
 
             name = name_orig
             exec(name + ' = tmp_group')
