@@ -18,6 +18,14 @@ try:
 except:
     fortran_flag = False
 
+def view_mat(mat):
+    """ Helper function used to visually examine matrices. """
+    import matplotlib.pyplot as plt
+    if len(mat.shape) > 2:
+        mat = numpy.sum(mat, axis=2)
+    im = plt.imshow(mat.real, interpolation='none')
+    plt.colorbar(im, orientation='horizontal')
+    plt.show()
 
 def norm(vec):
     return numpy.sqrt(numpy.sum(vec**2))
@@ -154,10 +162,8 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
             ###############
             # Mass matrix #
             ###############
-            mrhoAL = mrho * A[ielem] * L
-            mrhoAL = 0.75 * L
+            mrhoAL = mrho * .00028274 * A[ielem] * L
             mrhoJL = mrho * J[ielem] * L	# (J = Iy + Iz)
-            mrhoJL = 0.047 * L	# (J = Iy + Iz)
             M_a[:, :] = mrhoAL * const_M
             M_t[:, :] = mrhoJL * const_M
 
@@ -237,7 +243,6 @@ class SpatialBeamFEM(Component):
         self.nx = surface['num_x']
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
-        name = surface['name']
 
         self.size = size = 6 * self.ny + 6
 
@@ -248,9 +253,8 @@ class SpatialBeamFEM(Component):
         self.add_param('nodes', val=numpy.zeros((self.ny, 3)))
         self.add_param('loads', val=numpy.zeros((self.ny, 6)))
         self.add_state('disp_aug', val=numpy.zeros((size), dtype="complex"))
-        self.add_output('M', val=numpy.zeros((size, size)))
-        # self.add_output('C', val=numpy.zeros((size, size)))
-        self.add_output('K', val=numpy.zeros((size, size)))
+        self.add_output('evalues', val=numpy.zeros(((self.ny-1)*6)))
+        self.add_output('freqs', val=numpy.zeros((20)))
 
         # self.deriv_options['type'] = 'cs'
         # self.deriv_options['form'] = 'central'
@@ -333,8 +337,16 @@ class SpatialBeamFEM(Component):
 
         self.rhs = numpy.zeros(size, dtype='complex')
 
+	def createNBSolver(self, params, unknowns):
+		self.NBSolver = pyNBSolver(M = self.reduced_M,        # Mass matrix
+                                   C = self.reduced_C,        # Damping matrix
+                                   K = self.reduced_K,        # Stiffness matrix
+                                   N = self.num_dt+1,         # Number of timesteps you want to run
+                                   dt = unknowns['dt'])       # Timestep
+                                   #sl = 'cpld')              # Tells the solver that you use
+                                   #ft = "csv")               # Format for writing out displacements
+
     def solve_nonlinear(self, params, unknowns, resids):
-        name = self.surface['name']
         mrho = self.surface['mrho']
 
         # Find constrained nodes based on closeness to specified cg point
@@ -360,12 +372,30 @@ class SpatialBeamFEM(Component):
                              self.K, self.M, self.rhs)
 
         unknowns['disp_aug'] = self.x
-        # unknowns['M'] = self.M
-        # unknowns['K'] = self.K
+
+        del_list = []
+        for k in xrange(6):
+            del_list.append(6*self.cons+k)
+        self.reduced_K = numpy.delete(self.K[:-6, :-6], del_list, axis=0)
+        self.reduced_K = numpy.delete(self.reduced_K, del_list, axis=1)
+        self.reduced_M = numpy.delete(self.M[:-6, :-6], del_list, axis=0)
+        self.reduced_M = numpy.delete(self.reduced_M, del_list, axis=1)
+
+        # NO DAMPING
+        mat_for_eig_nodamp = Eig_matrix(self.reduced_M, self.reduced_K)
+        evalues, evectors = numpy.linalg.eig(-mat_for_eig_nodamp)
+        evalues_ord, evectors_ord = order(evalues, evectors)
+        frequencies = numpy.sqrt(-evalues)
+        freqs_ordered = numpy.sort(frequencies)
+
+        unknowns['evalues'] = evalues
+        unknowns['freqs'] = freqs_ordered[:20]
+
+        # unknowns['dt'] = 1.#self.final_t / self.num_dt
+
+        # self.createNBSolver(params, unknowns)
 
     def apply_nonlinear(self, params, unknowns, resids):
-        # Move these names instances into the init
-        name = self.surface['name']
         mrho = self.surface['mrho']
         loads = params['loads']
         self.M, self.K, _, self.rhs = \
@@ -386,8 +416,6 @@ class SpatialBeamFEM(Component):
 
     def linearize(self, params, unknowns, resids):
         """ Jacobian for disp."""
-
-        name = self.surface['name']
         jac = self.alloc_jacobian()
         fd_jac = self.fd_jacobian(params, unknowns, resids,
                                             fd_params=['A', 'Iy', 'Iz', 'J',
@@ -424,15 +452,6 @@ class SpatialBeamEIG(Component):
 
         self.deriv_options['type'] = 'cs'
         self.deriv_options['form'] = 'central'
-
-	def createNBSolver(self, params, unknowns):
-		self.NBSolver = pyNBSolver(M = self.reduced_M,        # Mass matrix
-                                   C = self.reduced_C,        # Damping matrix
-                                   K = self.reduced_K,        # Stiffness matrix
-                                   N = self.num_dt+1,         # Number of timesteps you want to run
-                                   dt = unknowns['dt'])       # Timestep
-                                   #sl = 'cpld')              # Tells the solver that you use
-                                   #ft = "csv")               # Format for writing out displacements
 
 	def solve_nonlinear(self, params, unknowns, resids):
 
@@ -487,7 +506,6 @@ class SpatialBeamDisp(Component):
         self.nx = surface['num_x']
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
-        name = surface['name']
 
         self.add_param('disp_aug', val=numpy.zeros(((self.ny+1)*6), dtype='complex'))
         self.add_output('disp', val=numpy.zeros((self.ny, 6), dtype='complex'))
@@ -499,7 +517,6 @@ class SpatialBeamDisp(Component):
     def solve_nonlinear(self, params, unknowns, resids):
         # Obtain the relevant portions of disp_aug and store the displacements
         # in disp
-        name = self.surface['name']
 
         unknowns['disp'] = params['disp_aug'][:-6].reshape((self.ny, 6))
 
@@ -537,7 +554,6 @@ class ComputeNodes(Component):
         self.nx = surface['num_x']
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
-        name = surface['name']
         self.fem_origin = surface['fem_origin']
 
         self.add_param('mesh', val=numpy.zeros((self.nx, self.ny, 3)))
@@ -545,7 +561,6 @@ class ComputeNodes(Component):
 
     def solve_nonlinear(self, params, unknowns, resids):
         w = self.fem_origin
-        name = self.surface['name']
         mesh = params['mesh']
 
         unknowns['nodes'] = (1-w) * mesh[0, :, :] + w * mesh[-1, :, :]
@@ -625,7 +640,6 @@ class SpatialBeamWeight(Component):
         self.nx = surface['num_x']
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
-        name = surface['name']
 
         self.add_param('A', val=numpy.zeros((self.ny - 1)))
         self.add_param('nodes', val=numpy.zeros((self.ny, 3)))
@@ -695,7 +709,6 @@ class SpatialBeamVonMisesTube(Component):
         self.nx = surface['num_x']
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
-        name = surface['name']
 
         self.add_param('nodes', val=numpy.zeros((self.ny, 3),
                        dtype="complex"))
@@ -726,7 +739,6 @@ class SpatialBeamVonMisesTube(Component):
 
     def solve_nonlinear(self, params, unknowns, resids):
         elem_IDs = self.elem_IDs
-        name = self.surface['name']
         r = params['r']
         disp = params['disp']
         nodes = params['nodes']
@@ -773,7 +785,6 @@ class SpatialBeamVonMisesTube(Component):
 
     def apply_linear(self, params, unknowns, dparams, dunknowns, dresids, mode):
 
-        name = self.surface['name']
         elem_IDs = self.elem_IDs
         r = params['r'].real
         disp = params['disp'].real
@@ -853,7 +864,6 @@ class SpatialBeamFailureKS(Component):
         self.nx = surface['num_x']
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
-        name = surface['name']
 
         self.add_param('vonmises', val=numpy.zeros((self.ny-1, 2)))
         self.add_output('failure', val=0.)
@@ -865,7 +875,6 @@ class SpatialBeamFailureKS(Component):
         self.rho = rho
 
     def solve_nonlinear(self, params, unknowns, resids):
-        name = self.surface['name']
         sigma = self.sigma
         rho = self.rho
         vonmises = params['vonmises']
