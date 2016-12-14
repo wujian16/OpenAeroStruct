@@ -18,6 +18,14 @@ try:
 except:
     fortran_flag = False
 
+def view_mat(mat):
+    """ Helper function used to visually examine matrices. """
+    import matplotlib.pyplot as plt
+    if len(mat.shape) > 2:
+        mat = numpy.sum(mat, axis=2)
+    im = plt.imshow(mat.real, interpolation='none')
+    plt.colorbar(im, orientation='horizontal')
+    plt.show()
 
 def norm(vec):
     return numpy.sqrt(numpy.sum(vec**2))
@@ -66,7 +74,7 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
 
     """
 
-    size = 6 * n + 6
+    size = 6 * n
     num_cons = 1
 
     num_elems = elem_IDs.shape[0]
@@ -186,21 +194,24 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
             M[6*in0:6*in0+6, 6*in1:6*in1+6] += res[:6, 6:]
             M[6*in1:6*in1+6, 6*in1:6*in1+6] += res[6:, 6:]
 
-        # Include a scaled identity matrix in the rows and columns
-        # corresponding to the structural constraints
-        for ind in xrange(num_cons):
-            for k in xrange(6):
-                K[-6+k, 6*cons+k] = 1.e9
-                K[6*cons+k, -6+k] = 1.e9
+        del_list = []
+        for k in xrange(6):
+            val = 6*cons+k
+            del_list.append(val)
+            K[val, :] = 0.
+            # K[:, val] = 0.
+            K[val, val] = 1.#numpy.max(K)
+            M[val, :] = 0.
+            # M[:, val] = 0.
+            M[val, val] = 1.#numpy.max(M)
 
-    # Check to solve on the Python level if not done on the Fortran level
-    if not fortran_flag:
-        x = numpy.linalg.solve(K, rhs)
+        # view_mat(K)
+        # view_mat(M)
 
-    return M, K, x, rhs
+    return M, K
 
 
-class SpatialBeamFEM(Component):
+class SpatialBeamMatrices(Component):
     """
     Compute the displacements and rotations by solving the linear system
     using the structural stiffness matrix.
@@ -223,14 +234,14 @@ class SpatialBeamFEM(Component):
 
     Returns
     -------
-    disp_aug[6*(ny+1)] : array_like
+    disp[6*(ny+1)] : array_like
         Augmented displacement array. Obtained by solving the system
-        K * disp_aug = rhs, where rhs is a flattened version of loads.
+        K * disp = rhs, where rhs is a flattened version of loads.
 
     """
 
     def __init__(self, surface, cg_x=5):
-        super(SpatialBeamFEM, self).__init__()
+        super(SpatialBeamMatrices, self).__init__()
 
         self.surface = surface
         self.ny = surface['num_y']
@@ -239,7 +250,7 @@ class SpatialBeamFEM(Component):
         self.mesh = surface['mesh']
         name = surface['name']
 
-        self.size = size = 6 * self.ny + 6
+        self.size = size = 6 * self.ny
 
         self.add_param('A', val=numpy.zeros((self.ny - 1)))
         self.add_param('Iy', val=numpy.zeros((self.ny - 1)))
@@ -247,14 +258,12 @@ class SpatialBeamFEM(Component):
         self.add_param('J', val=numpy.zeros((self.ny - 1)))
         self.add_param('nodes', val=numpy.zeros((self.ny, 3)))
         self.add_param('loads', val=numpy.zeros((self.ny, 6)))
-        self.add_state('disp_aug', val=numpy.zeros((size), dtype="complex"))
-        self.add_output('M', val=numpy.zeros((size, size)))
-        self.add_output('C', val=numpy.zeros((size, size)))
-        self.add_output('K', val=numpy.zeros((size, size)))
+        self.add_output('M', val=numpy.zeros((size, size)), dtype='complex')
+        # self.add_output('C', val=numpy.zeros((size, size)), dtype='complex')
+        self.add_output('K', val=numpy.zeros((size, size)), dtype='complex')
 
-        # self.deriv_options['type'] = 'cs'
-        # self.deriv_options['form'] = 'central'
-        self.deriv_options['linearize'] = True  # only for FEM
+        self.deriv_options['type'] = 'fd'
+        self.deriv_options['form'] = 'central'
 
         self.E = surface['E']
         self.G = surface['G']
@@ -345,7 +354,7 @@ class SpatialBeamFEM(Component):
 
         loads = params['loads']
 
-        self.M, self.K, self.x, self.rhs = \
+        self.M, self.K = \
             _assemble_system(params['nodes'],
                              params['A'], params['J'], params['Iy'],
                              params['Iz'], loads, self.K_a, self.K_t,
@@ -359,30 +368,65 @@ class SpatialBeamFEM(Component):
                              self.const_zz, self.ny, self.size,
                              self.K, self.M, self.rhs)
 
-        unknowns['disp_aug'] = self.x
         unknowns['M'] = self.M
         unknowns['K'] = self.K
 
-    def apply_nonlinear(self, params, unknowns, resids):
-        # Move these names instances into the init
-        name = self.surface['name']
-        mrho = self.surface['mrho']
-        loads = params['loads']
-        self.M, self.K, _, self.rhs = \
-            _assemble_system(params['nodes'],
-                             params['A'], params['J'], params['Iy'],
-                             params['Iz'], loads, self.K_a, self.K_t,
-                             self.K_y, self.K_z, self.M_a, self.M_t,
-                             self.M_y, self.M_z, self.elem_IDs, self.cons,
-                             self.E, self.G, self.x_gl, self.T, self.K_elem,
-                             self.M_elem, mrho,
-                             self.S_a, self.S_t, self.S_y, self.S_z,
-                             self.T_elem, self.const_K, self.const_y,
-                             self.const_z, self.const_M, self.const_yy, self.const_zz,
-                             self.ny, self.size, self.K, self.M, self.rhs)
 
-        disp_aug = unknowns['disp_aug']
-        resids['disp_aug'] = self.K.dot(disp_aug) - self.rhs
+class SpatialBeamFEM(Component):
+    """ Computes displacements of beam nodes by integrating dynamic system """
+
+    def __init__(self, surface):
+        super(SpatialBeamFEM, self).__init__()
+
+        self.surface = surface
+        self.ny = surface['num_y']
+        self.nx = surface['num_x']
+        self.n = self.nx * self.ny
+        self.mesh = surface['mesh']
+        name = surface['name']
+
+        self.size = size = 6 * self.ny
+
+        self.add_param('K', val=numpy.zeros((size, size)))
+        self.add_param('M', val=numpy.zeros((size, size)))
+
+        self.add_param('nodes', val=numpy.zeros((self.ny, 3), dtype="complex"))
+        self.add_param('loads', val=numpy.zeros((self.ny, 6)))
+        self.add_state('disp', val=numpy.zeros((self.ny, 6)))
+
+        self.rhs = numpy.zeros(size, dtype='complex')
+
+
+    def solve_nonlinear(self, params, unknowns, resids):
+
+        # Find constrained nodes based on closeness to specified cg point
+        nodes = params['nodes']
+        dist = nodes - numpy.array([5., 0, 0])
+        idx = (numpy.linalg.norm(dist, axis=1)).argmin()
+        cons = idx
+
+        K = params['K'].copy()
+
+        del_list = []
+        for k in xrange(6):
+            del_list.append(6*cons+k)
+        self.rhs = numpy.delete(self.rhs, del_list, axis=0)
+
+        self.rhs[:] = 0.
+        self.rhs = params['loads'].reshape(-1)
+        view_mat(params['loads'])
+        self.rhs[numpy.abs(self.rhs) < 1e-6] = 0.
+        self.K = params['K']
+    	disp = numpy.linalg.solve(params['K'], self.rhs)
+        unknowns['disp'] = disp.reshape(-1, 6)
+
+    def apply_nonlinear(self, params, unknowns, resids):
+        self.rhs[:] = 0.
+        self.rhs = params['loads'].reshape(-1)
+        self.rhs[numpy.abs(self.rhs) < 1e-6] = 0.
+
+        disp = unknowns['disp'].reshape(-1)
+        resids['disp'] = params['K'].dot(disp) - self.rhs
 
     def linearize(self, params, unknowns, resids):
         """ Jacobian for disp."""
@@ -390,11 +434,10 @@ class SpatialBeamFEM(Component):
         name = self.surface['name']
         jac = self.alloc_jacobian()
         fd_jac = self.fd_jacobian(params, unknowns, resids,
-                                            fd_params=['A', 'Iy', 'Iz', 'J',
-                                                       'nodes', 'loads'],
+                                            fd_params=['K', 'loads'],
                                             fd_states=[])
         jac.update(fd_jac)
-        jac['disp_aug', 'disp_aug'] = self.K.real
+        jac['disp', 'disp'] = self.K.real
 
         self.lup = lu_factor(self.K.real)
 
@@ -410,9 +453,6 @@ class SpatialBeamFEM(Component):
             t = 1
 
         for voi in vois:
-
-            print numpy.prod(self.lup[0].shape)
-            print rhs_vec[voi].vec.shape
             sol_vec[voi].vec[:] = \
                 lu_solve(self.lup, rhs_vec[voi].vec, trans=t)
 
@@ -420,38 +460,48 @@ class SpatialBeamFEM(Component):
 class SpatialBeamEIG(Component):
     """ Computes eigenvalues and eigenvectors. """
 
-    def __init__(self, n, num_dt, final_t):
+    def __init__(self, surface):
         super(SpatialBeamEIG, self).__init__()
 
-        self.size = size = 6 * n
-        self.size_eig = size_eig = size - 6
+        self.surface = surface
+        self.ny = surface['num_y']
+        self.nx = surface['num_x']
+        self.n = self.nx * self.ny
+        self.mesh = surface['mesh']
+        name = surface['name']
+
+        self.size = size = 6 * self.ny
 
         self.add_param('v', val=10.)
         self.add_param('span', val=58.7630524)
         self.add_param('M', val=numpy.zeros((size, size), dtype="complex"))
         self.add_param('C', val=numpy.zeros((size, size), dtype="complex"))
         self.add_param('K', val=numpy.zeros((size, size), dtype="complex"))
+        self.add_param('nodes', val=numpy.zeros((self.ny, 3), dtype="complex"))
 
-        #self.add_output('evalues', val=numpy.zeros((size_eig)), dtype="complex")
-        #self.add_output('evectors', val=numpy.zeros((size_eig, size_eig)), dtype="complex")
+
+        #self.add_output('evalues', val=numpy.zeros((size)), dtype="complex")
+        #self.add_output('evectors', val=numpy.zeros((size, size)), dtype="complex")
         self.add_output('dt', val=0.001)
 
-        self.omega_list = numpy.zeros(4, dtype='complex')
-        self.num_dt = num_dt
-        self.final_t = final_t
+        # self.omega_list = numpy.zeros(4, dtype='complex')
+        # self.num_dt = 1.
+        # self.final_t = final_t
 
-        #self.evalues = numpy.zeros(size_eig, dtype='complex')
-        #self.evectors = numpy.zeros((size_eig,size_eig), dtype='complex')
-        #self.pulsations = numpy.zeros(size_eig, dtype='complex')
+        #self.evalues = numpy.zeros(size, dtype='complex')
+        #self.evectors = numpy.zeros((size,size), dtype='complex')
+        #self.pulsations = numpy.zeros(size, dtype='complex')
 
-        self.I_mtx = numpy.eye((size_eig), dtype='complex')
-        self.O_mtx = numpy.zeros((size_eig, size_eig), dtype='complex')
-        self.A_mtx = numpy.zeros(((size_eig*2), (size_eig*2)), dtype='complex')
-        self.B_mtx = numpy.zeros(((size_eig*2), (size_eig*2)), dtype='complex')
-        self.J_mtx = numpy.zeros(((size_eig*2), (size_eig*2)), dtype='complex')
+        self.I_mtx = numpy.eye((size), dtype='complex')
+        self.O_mtx = numpy.zeros((size, size), dtype='complex')
+        self.A_mtx = numpy.zeros(((size*2), (size*2)), dtype='complex')
+        self.B_mtx = numpy.zeros(((size*2), (size*2)), dtype='complex')
+        self.J_mtx = numpy.zeros(((size*2), (size*2)), dtype='complex')
 
         self.deriv_options['type'] = 'cs'
         self.deriv_options['form'] = 'central'
+
+        self.cg_x = 5.
 
 	def createNBSolver(self, params, unknowns):
 		self.NBSolver = pyNBSolver(M = self.reduced_M,        # Mass matrix
@@ -462,104 +512,69 @@ class SpatialBeamEIG(Component):
                                    #sl = 'cpld')              # Tells the solver that you use
                                    #ft = "csv")               # Format for writing out displacements
 
-	def solve_nonlinear(self, params, unknowns, resids):
-
-		self.reduced_M = params['M'][6:, 6:]
-		self.reduced_C = params['C'][6:, 6:]
-		self.reduced_K = params['K'][6:, 6:]
-
-		# NO DAMPING
-		mat_for_eig_nodamp = Eig_matrix(self.reduced_M, self.reduced_K)
-		evalues, evectors = numpy.linalg.eig(-mat_for_eig_nodamp)
-		evalues_ord, evectors_ord = order(evalues, evectors)
-		pulsations = numpy.sqrt(-evalues)
-		puls_ord = numpy.sort(pulsations)
-		print
-		print 'eigenvalues', evalues
-		#print 'natural freqs [Hz] =', numpy.sqrt(evalues_ord[:20])/(2*numpy.pi)
-		print 'natural freqs [rad/s] =', puls_ord[:20]
-		print
-
-		# WITH DAMPING
-		se = self.size_eig
-		self.A_mtx[:se,:se] = self.I_mtx
-		self.A_mtx[:se,se:] = self.O_mtx
-		self.A_mtx[se:,:se] = self.O_mtx
-		self.A_mtx[se:,se:] = self.reduced_M
-		self.B_mtx[:se,:se] = self.O_mtx
-		self.B_mtx[:se,se:] = -self.I_mtx
-		self.B_mtx[se:,:se] = self.reduced_K
-		self.B_mtx[se:,se:] = self.reduced_C
-
-		self.J_mtx = Eig_matrix(self.A_mtx, self.B_mtx)
-
-		evalues_damp, evectors_damp = numpy.linalg.eig(-self.J_mtx)
-		evalues_damp_ord, evectors_damp_ord = order(evalues_damp, evectors_damp)
-		pulsations_damp = evalues_ord
-		print 'natural freqs damp [rad/s] =', pulsations_damp[:20]
-
-		# Diagonalization
-		#PHI = self.evectors
-		#PHI_T = numpy.transpose(self.evectors)
-		#M_diag = numpy.diag(numpy.diag(numpy.dot(PHI_T,numpy.dot(self.reduced_M,PHI))))
-		#K_diag = numpy.diag(numpy.diag(numpy.dot(PHI_T,numpy.dot(self.reduced_K,PHI))))
-
-
-		unknowns['dt'] = self.final_t / self.num_dt
-
-		self.createNBSolver(params, unknowns)
-
-class SpatialBeamDisp(Component):
-    """
-    Select displacements from augmented vector.
-
-    The solution to the linear system has additional results due to the
-    constraints on the FEM model. The displacements from this portion of
-    the linear system is not needed, so we select only the relevant
-    portion of the displacements for further calculations.
-
-    Parameters
-    ----------
-    disp_aug[6*(ny+1)] : array_like
-        Augmented displacement array. Obtained by solving the system
-        K * disp_aug = rhs, where rhs is a flattened version of loads.
-
-    Returns
-    -------
-    disp[6*ny] : array_like
-        Actual displacement array formed by truncating disp_aug.
-
-    """
-
-    def __init__(self, surface):
-        super(SpatialBeamDisp, self).__init__()
-
-        self.surface = surface
-        self.ny = surface['num_y']
-        self.nx = surface['num_x']
-        self.n = self.nx * self.ny
-        self.mesh = surface['mesh']
-        name = surface['name']
-
-        self.add_param('disp_aug', val=numpy.zeros(((self.ny+1)*6), dtype='complex'))
-        self.add_output('disp', val=numpy.zeros((self.ny, 6), dtype='complex'))
-        self.arange = numpy.arange(6*self.ny)
-
-        # self.deriv_options['type'] = 'cs'
-        # self.deriv_options['form'] = 'central'
-
     def solve_nonlinear(self, params, unknowns, resids):
-        # Obtain the relevant portions of disp_aug and store the displacements
-        # in disp
-        name = self.surface['name']
 
-        unknowns['disp'] = params['disp_aug'][:-6].reshape((self.ny, 6))
+        # Find constrained nodes based on closeness to specified cg point
+        nodes = params['nodes']
+        dist = nodes - numpy.array([self.cg_x, 0, 0])
+        idx = (numpy.linalg.norm(dist, axis=1)).argmin()
+        cons = idx
 
-    def linearize(self, params, unknowns, resids):
-        jac = self.alloc_jacobian()
-        n = self.ny * 6
-        jac['disp', 'disp_aug'] = numpy.hstack((numpy.eye((n)), numpy.zeros((n, 6))))
-        return jac
+        K, M = params['K'].copy(), params['M'].copy()
+
+        del_list = []
+        for k in xrange(6):
+            del_list.append(6*cons+k)
+        K = numpy.delete(K, del_list, axis=0)
+        K = numpy.delete(K, del_list, axis=1)
+        M = numpy.delete(M, del_list, axis=0)
+        M = numpy.delete(M, del_list, axis=1)
+
+        self.reduced_M = M
+        # self.reduced_C = C
+        self.reduced_K = K
+
+        # NO DAMPING
+        mat_for_eig_nodamp = Eig_matrix(self.reduced_M, self.reduced_K)
+        evalues, evectors = numpy.linalg.eig(-mat_for_eig_nodamp)
+        evalues_ord, evectors_ord = order(evalues, evectors)
+        pulsations = numpy.sqrt(-evalues)
+        puls_ord = numpy.sort(pulsations)
+        # print
+        # print 'eigenvalues', evalues
+        # #print 'natural freqs [Hz] =', numpy.sqrt(evalues_ord[:20])/(2*numpy.pi)
+        # print 'natural freqs [rad/s] =', puls_ord[:20]
+        # print
+
+        # # WITH DAMPING
+        # se = self.size
+        # self.A_mtx[:se,:se] = self.I_mtx
+        # self.A_mtx[:se,se:] = self.O_mtx
+        # self.A_mtx[se:,:se] = self.O_mtx
+        # self.A_mtx[se:,se:] = self.reduced_M
+        # self.B_mtx[:se,:se] = self.O_mtx
+        # self.B_mtx[:se,se:] = -self.I_mtx
+        # self.B_mtx[se:,:se] = self.reduced_K
+        # self.B_mtx[se:,se:] = self.reduced_C
+        #
+        # self.J_mtx = Eig_matrix(self.A_mtx, self.B_mtx)
+        #
+        # evalues_damp, evectors_damp = numpy.linalg.eig(-self.J_mtx)
+        # evalues_damp_ord, evectors_damp_ord = order(evalues_damp, evectors_damp)
+        # pulsations_damp = evalues_ord
+        # print 'natural freqs damp [rad/s] =', pulsations_damp[:20]
+
+        # # Diagonalization
+        # #PHI = self.evectors
+        # #PHI_T = numpy.transpose(self.evectors)
+        # #M_diag = numpy.diag(numpy.diag(numpy.dot(PHI_T,numpy.dot(self.reduced_M,PHI))))
+        # #K_diag = numpy.diag(numpy.diag(numpy.dot(PHI_T,numpy.dot(self.reduced_K,PHI))))
+        #
+        #
+        unknowns['dt'] = numpy.linalg.norm(params['M'])#self.final_t / self.num_dt
+        #
+        # self.createNBSolver(params, unknowns)
+
 
 
 class ComputeNodes(Component):
@@ -617,7 +632,7 @@ class SpatialBeamEnergy(Component):
     Parameters
     ----------
     disp[ny, 6] : array_like
-        Actual displacement array formed by truncating disp_aug.
+        Actual displacement array formed by truncating disp.
     loads[ny, 6] : array_like
         Array containing the loads applied on the FEM component,
         computed from the sectional forces.
@@ -845,31 +860,6 @@ class SpatialBeamVonMisesTube(Component):
             dparams['r'] += b
             dparams['disp'] += c
 
-        ### DOT PRODUCT TEST ###
-        # nodesd = numpy.random.random_sample(nodes.shape)
-        # rd = numpy.random.random_sample(r.shape)
-        # dispd = numpy.random.random_sample(disp.shape)
-        #
-        # nodesd_copy = nodesd.copy()
-        # rd_copy = rd.copy()
-        # dispd_copy = dispd.copy()
-        #
-        # vonmises, vonmisesd = OAS_API.oas_api.calc_vonmises_d(elem_IDs+1, nodes, nodesd, r, rd, disp, dispd, E, G, x_gl)
-        #
-        # vonmisesb = numpy.random.random_sample(vonmises.shape)
-        # vonmisesb_copy = vonmisesb.copy()
-        #
-        # nodesb, rb, dispb = OAS_API.oas_api.calc_vonmises_b(elem_IDs+1, nodes, r, disp, E, G, x_gl, vonmises, vonmisesb)
-        #
-        # dotprod = 0.
-        # dotprod += numpy.sum(nodesd_copy*nodesb)
-        # dotprod += numpy.sum(rd_copy*rb)
-        # dotprod += numpy.sum(dispd_copy*dispb)
-        # dotprod -= numpy.sum(vonmisesd*vonmisesb_copy)
-        # print
-        # print 'SHOULD BE ZERO:', dotprod
-        # print
-
 class SpatialBeamFailureKS(Component):
     """
     Aggregate failure constraints from the structure.
@@ -938,12 +928,15 @@ class SpatialBeamStates(Group):
         self.add('nodes',
                  ComputeNodes(surface),
                  promotes=['*'])
+        self.add('matrices',
+                 SpatialBeamMatrices(surface),
+                 promotes=['*'])
+        self.add('eig',
+                 SpatialBeamEIG(surface),
+                 promotes=['*'])
         self.add('fem',
-                 SpatialBeamFEM(surface),
-                 promotes=['*'])
-        self.add('disp',
-                 SpatialBeamDisp(surface),
-                 promotes=['*'])
+              SpatialBeamFEM(surface),
+              promotes=['*'])
 
 
 class SpatialBeamFunctionals(Group):
