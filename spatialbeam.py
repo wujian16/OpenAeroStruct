@@ -197,7 +197,7 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
     if not fortran_flag:
         x = numpy.linalg.solve(K, rhs)
 
-    return K, x, rhs
+    return M, K, x, rhs
 
 
 class SpatialBeamFEM(Component):
@@ -248,10 +248,12 @@ class SpatialBeamFEM(Component):
         self.add_param('nodes', val=numpy.zeros((self.ny, 3)))
         self.add_param('loads', val=numpy.zeros((self.ny, 6)))
         self.add_state('disp_aug', val=numpy.zeros((size), dtype="complex"))
+        self.add_output('M', val=numpy.zeros((size, size)))
+        self.add_output('C', val=numpy.zeros((size, size)))
+        self.add_output('K', val=numpy.zeros((size, size)))
 
         # self.deriv_options['type'] = 'cs'
         # self.deriv_options['form'] = 'central'
-        #self.deriv_options['extra_check_partials_form'] = "central"
         self.deriv_options['linearize'] = True  # only for FEM
 
         self.E = surface['E']
@@ -343,7 +345,7 @@ class SpatialBeamFEM(Component):
 
         loads = params['loads']
 
-        self.K, self.x, self.rhs = \
+        self.M, self.K, self.x, self.rhs = \
             _assemble_system(params['nodes'],
                              params['A'], params['J'], params['Iy'],
                              params['Iz'], loads, self.K_a, self.K_t,
@@ -358,14 +360,15 @@ class SpatialBeamFEM(Component):
                              self.K, self.M, self.rhs)
 
         unknowns['disp_aug'] = self.x
-
+        unknowns['M'] = self.M
+        unknowns['K'] = self.K
 
     def apply_nonlinear(self, params, unknowns, resids):
         # Move these names instances into the init
         name = self.surface['name']
         mrho = self.surface['mrho']
         loads = params['loads']
-        self.K, _, self.rhs = \
+        self.M, self.K, _, self.rhs = \
             _assemble_system(params['nodes'],
                              params['A'], params['J'], params['Iy'],
                              params['Iz'], loads, self.K_a, self.K_t,
@@ -381,118 +384,6 @@ class SpatialBeamFEM(Component):
         disp_aug = unknowns['disp_aug']
         resids['disp_aug'] = self.K.dot(disp_aug) - self.rhs
 
-    # def apply_linear(self, params, unknowns, dparams, dunknowns, dresids, mode):
-    #     name = self.surface['name']
-    #     loads = params['loads']
-    #     num_elems = self.elem_IDs.shape[0]
-    #
-    #     ### DOT PRODUCT TEST ###
-    #     nodesd = numpy.random.random_sample(params['nodes'].shape)
-    #     Ad = numpy.random.random_sample(params['A'].shape)
-    #     Jd = numpy.random.random_sample(params['J'].shape)
-    #     Iyd = numpy.random.random_sample(params['Iy'].shape)
-    #     Izd = numpy.random.random_sample(params['Iz'].shape)
-    #     loadsd = numpy.random.random_sample(loads.shape)
-    #
-    #     nodesd_copy = nodesd.copy()
-    #     Ad_copy = Ad.copy()
-    #     Jd_copy = Jd.copy()
-    #     Iyd_copy = Iyd.copy()
-    #     Izd_copy = Izd.copy()
-    #     loadsd_copy = loadsd.copy()
-    #
-    #     self.K, Kd, self.x, xd = OAS_API.oas_api.assemblestructmtx_d(params['nodes'], nodesd,
-    #                      params['A'], Ad, params['J'], Jd, params['Iy'], Iyd,
-    #                      params['Iz'], Izd,
-    #                                  self.K_a, self.K_t,
-    #                                  self.K_y, self.K_z, self.elem_IDs+1, self.cons,
-    #                                  self.E*numpy.ones(num_elems), self.G*numpy.ones(num_elems), self.x_gl, self.T, self.K_elem,
-    #                                  self.S_a, self.S_t, self.S_y, self.S_z,
-    #                                  self.T_elem, self.const_K, self.const_y,
-    #                                  self.const_z, loads, loadsd)
-    #
-    #     Kb = numpy.random.random_sample(self.K.shape)
-    #     xb = numpy.random.random_sample(unknowns['disp_aug'].shape)
-    #     Kb_copy = Kb.copy()
-    #     xb_copy = xb.copy()
-    #
-    #     nodesb, Ab, Jb, Iyb, Izb, loadsb = OAS_API.oas_api.assemblestructmtx_b(params['nodes'],
-    #                      params['A'], params['J'], params['Iy'],
-    #                      params['Iz'],
-    #                                  self.K_a, self.K_t,
-    #                                  self.K_y, self.K_z, self.elem_IDs+1, self.cons,
-    #                                  self.E*numpy.ones(num_elems), self.G*numpy.ones(num_elems), self.x_gl, self.T, self.K_elem,
-    #                                  self.S_a, self.S_t, self.S_y, self.S_z,
-    #                                  self.T_elem, self.const_K, self.const_y,
-    #                                  self.const_z, loads, self.K, Kb, self.x, xb)
-    #
-    #
-    #     dotprod = 0.
-    #     dotprod += numpy.sum(nodesd_copy*nodesb)
-    #     dotprod += numpy.sum(Ad_copy*Ab)
-    #     dotprod += numpy.sum(Jd_copy*Jb)
-    #     dotprod += numpy.sum(Iyd_copy*Iyb)
-    #     dotprod += numpy.sum(Izd_copy*Izb)
-    #     dotprod += numpy.sum(loadsd_copy*loadsb)
-    #     dotprod -= numpy.sum(Kb_copy*Kd)
-    #     dotprod -= numpy.sum(xd*xb_copy)
-    #     # print
-    #     # print 'SHOULD BE ZERO:', dotprod
-    #     # print
-    #     # exit()
-    #
-    #
-    #     if mode == 'fwd':
-    #         self.K, Kd, self.x, xd = OAS_API.oas_api.assemblestructmtx_d(params['nodes'], dparams['nodes'],
-    #                          params['A'], dparams['A'], params['J'], dparams['J'], params['Iy'], dparams['Iy'],
-    #                          params['Iz'], dparams['Iz'],
-    #                                      self.K_a, self.K_t,
-    #                                      self.K_y, self.K_z, self.elem_IDs+1, self.cons,
-    #                                      self.E*numpy.ones(num_elems), self.G*numpy.ones(num_elems), self.x_gl, self.T, self.K_elem,
-    #                                      self.S_a, self.S_t, self.S_y, self.S_z,
-    #                                      self.T_elem, self.const_K, self.const_y,
-    #                                      self.const_z, loads, dparams['loads'])
-    #
-    #         dresids['disp_aug'] += xd
-    #         # print '!!!!!!!!!!!!!!!!!!!'
-    #         # print dparams['nodes']
-    #         # print dparams['A']
-    #         # print dparams['J']
-    #         # print dparams['Iy']
-    #         # print dparams['Iz']
-    #         # print dparams['loads']
-    #         # print dresids['disp_aug']
-    #
-    #
-    #     else:
-    #         seeds = dresids['disp_aug'].copy()
-    #
-    #         nodesb, Ab, Jb, Iyb, Izb, loadsb = OAS_API.oas_api.assemblestructmtx_b(params['nodes'].copy(),
-    #                          params['A'].copy(), params['J'].copy(), params['Iy'].copy(),
-    #                          params['Iz'].copy(),
-    #                                      self.K_a, self.K_t,
-    #                                      self.K_y, self.K_z, self.elem_IDs+1, self.cons,
-    #                                      self.E*numpy.ones(num_elems), self.G*numpy.ones(num_elems), self.x_gl, self.T, self.K_elem,
-    #                                      self.S_a, self.S_t, self.S_y, self.S_z,
-    #                                      self.T_elem, self.const_K, self.const_y,
-    #                                      self.const_z, loads, self.K, numpy.zeros(self.K.shape), unknowns['disp_aug'].copy(), seeds)
-    #
-    #         dparams['nodes'] += nodesb
-    #         dparams['A'] += Ab
-    #         dparams['J'] += Jb
-    #         dparams['Iy'] += Iyb
-    #         dparams['Iz'] += Izb
-    #         dparams['loads'] += loadsb
-    #
-    #         # print '@@@@@@@@@@@@@@@@@@@@'
-    #         # print dparams['nodes']
-    #         # print dparams['A']
-    #         # print dparams['J']
-    #         # print dparams['Iy']
-    #         # print dparams['Iz']
-    #         # print dparams['loads']
-    #         # print dresids['disp_aug']
-    #
     def linearize(self, params, unknowns, resids):
         """ Jacobian for disp."""
 
@@ -519,15 +410,104 @@ class SpatialBeamFEM(Component):
             t = 1
 
         for voi in vois:
-            if type(self.K) == numpy.ndarray:
-                sol_vec[voi].vec[:] = \
-                    lu_solve(self.lup, rhs_vec[voi].vec, trans=t)
-            else:
-                if t == 0:
-                    sol_vec[voi].vec[:] = self.splu.solve(rhs_vec[voi].vec)
-                elif t == 1:
-                    sol_vec[voi].vec[:] = self.spluT.solve(rhs_vec[voi].vec)
 
+            print numpy.prod(self.lup[0].shape)
+            print rhs_vec[voi].vec.shape
+            sol_vec[voi].vec[:] = \
+                lu_solve(self.lup, rhs_vec[voi].vec, trans=t)
+
+
+class SpatialBeamEIG(Component):
+    """ Computes eigenvalues and eigenvectors. """
+
+    def __init__(self, n, num_dt, final_t):
+        super(SpatialBeamEIG, self).__init__()
+
+        self.size = size = 6 * n
+        self.size_eig = size_eig = size - 6
+
+        self.add_param('v', val=10.)
+        self.add_param('span', val=58.7630524)
+        self.add_param('M', val=numpy.zeros((size, size), dtype="complex"))
+        self.add_param('C', val=numpy.zeros((size, size), dtype="complex"))
+        self.add_param('K', val=numpy.zeros((size, size), dtype="complex"))
+
+        #self.add_output('evalues', val=numpy.zeros((size_eig)), dtype="complex")
+        #self.add_output('evectors', val=numpy.zeros((size_eig, size_eig)), dtype="complex")
+        self.add_output('dt', val=0.001)
+
+        self.omega_list = numpy.zeros(4, dtype='complex')
+        self.num_dt = num_dt
+        self.final_t = final_t
+
+        #self.evalues = numpy.zeros(size_eig, dtype='complex')
+        #self.evectors = numpy.zeros((size_eig,size_eig), dtype='complex')
+        #self.pulsations = numpy.zeros(size_eig, dtype='complex')
+
+        self.I_mtx = numpy.eye((size_eig), dtype='complex')
+        self.O_mtx = numpy.zeros((size_eig, size_eig), dtype='complex')
+        self.A_mtx = numpy.zeros(((size_eig*2), (size_eig*2)), dtype='complex')
+        self.B_mtx = numpy.zeros(((size_eig*2), (size_eig*2)), dtype='complex')
+        self.J_mtx = numpy.zeros(((size_eig*2), (size_eig*2)), dtype='complex')
+
+        self.deriv_options['type'] = 'cs'
+        self.deriv_options['form'] = 'central'
+
+	def createNBSolver(self, params, unknowns):
+		self.NBSolver = pyNBSolver(M = self.reduced_M,        # Mass matrix
+                                   C = self.reduced_C,        # Damping matrix
+                                   K = self.reduced_K,        # Stiffness matrix
+                                   N = self.num_dt+1,         # Number of timesteps you want to run
+                                   dt = unknowns['dt'])       # Timestep
+                                   #sl = 'cpld')              # Tells the solver that you use
+                                   #ft = "csv")               # Format for writing out displacements
+
+	def solve_nonlinear(self, params, unknowns, resids):
+
+		self.reduced_M = params['M'][6:, 6:]
+		self.reduced_C = params['C'][6:, 6:]
+		self.reduced_K = params['K'][6:, 6:]
+
+		# NO DAMPING
+		mat_for_eig_nodamp = Eig_matrix(self.reduced_M, self.reduced_K)
+		evalues, evectors = numpy.linalg.eig(-mat_for_eig_nodamp)
+		evalues_ord, evectors_ord = order(evalues, evectors)
+		pulsations = numpy.sqrt(-evalues)
+		puls_ord = numpy.sort(pulsations)
+		print
+		print 'eigenvalues', evalues
+		#print 'natural freqs [Hz] =', numpy.sqrt(evalues_ord[:20])/(2*numpy.pi)
+		print 'natural freqs [rad/s] =', puls_ord[:20]
+		print
+
+		# WITH DAMPING
+		se = self.size_eig
+		self.A_mtx[:se,:se] = self.I_mtx
+		self.A_mtx[:se,se:] = self.O_mtx
+		self.A_mtx[se:,:se] = self.O_mtx
+		self.A_mtx[se:,se:] = self.reduced_M
+		self.B_mtx[:se,:se] = self.O_mtx
+		self.B_mtx[:se,se:] = -self.I_mtx
+		self.B_mtx[se:,:se] = self.reduced_K
+		self.B_mtx[se:,se:] = self.reduced_C
+
+		self.J_mtx = Eig_matrix(self.A_mtx, self.B_mtx)
+
+		evalues_damp, evectors_damp = numpy.linalg.eig(-self.J_mtx)
+		evalues_damp_ord, evectors_damp_ord = order(evalues_damp, evectors_damp)
+		pulsations_damp = evalues_ord
+		print 'natural freqs damp [rad/s] =', pulsations_damp[:20]
+
+		# Diagonalization
+		#PHI = self.evectors
+		#PHI_T = numpy.transpose(self.evectors)
+		#M_diag = numpy.diag(numpy.diag(numpy.dot(PHI_T,numpy.dot(self.reduced_M,PHI))))
+		#K_diag = numpy.diag(numpy.diag(numpy.dot(PHI_T,numpy.dot(self.reduced_K,PHI))))
+
+
+		unknowns['dt'] = self.final_t / self.num_dt
+
+		self.createNBSolver(params, unknowns)
 
 class SpatialBeamDisp(Component):
     """
