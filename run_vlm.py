@@ -29,9 +29,10 @@ if __name__ == "__main__":
     # Instantiate problem and add default surface
     OAS_prob = OASProblem(prob_dict)
     OAS_prob.add_surface({'name' : 'wing',
-                          'symmetry' : False,
+                          'symmetry' : True,
                           'num_y' : 15,
-                          'num_x' : 3})
+                          'num_x' : 3,
+                          'span_cos_spacing' : 0.})
 
     # Single lifting surface
     if not sys.argv[1].endswith('m'):
@@ -76,3 +77,4 @@ if __name__ == "__main__":
 
     print "\nWing CL:", OAS_prob.prob['wing_perf.CL']
     print "Wing CD:", OAS_prob.prob['wing_perf.CD']
+    print 'L/D', OAS_prob.prob['wing_perf.CL'] / OAS_prob.prob['wing_perf.CD']

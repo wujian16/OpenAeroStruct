@@ -19,66 +19,66 @@ class TestAero(unittest.TestCase):
         self.assertAlmostEqual(prob['wing_perf.CL'], .46173591841167, places=5)
         self.assertAlmostEqual(prob['wing_perf.CD'], .005524603647, places=5)
 
-    def test_aero_analysis_flat_multiple(self):
-        OAS_prob = OASProblem({'type' : 'aero',
-                               'optimize' : False})
-        OAS_prob.add_surface({'span_cos_spacing' : 0.})
-        OAS_prob.add_surface({'name' : 'tail',
-                              'span_cos_spacing' : 0.,
-                              'offset' : numpy.array([0., 0., 1000000.])})
-        OAS_prob.setup()
-        OAS_prob.run()
-        prob = OAS_prob.prob
-        self.assertAlmostEqual(prob['wing_perf.CL'], .46173591841167, places=5)
-        self.assertAlmostEqual(prob['tail_perf.CL'], .46173591841167, places=5)
-
-    def test_aero_analysis_flat_side_by_side(self):
-        OAS_prob = OASProblem({'type' : 'aero',
-                               'optimize' : False})
-        OAS_prob.add_surface({'name' : 'wing',
-                              'span' : 5.,
-                              'num_y' : 3,
-                              'span_cos_spacing' : 0.,
-                              'offset' : numpy.array([0., -2.5, 0.])})
-        OAS_prob.add_surface({'name' : 'tail',
-                              'span' : 5.,
-                              'num_y' : 3,
-                              'span_cos_spacing' : 0.,
-                              'offset' : numpy.array([0., 2.5, 0.])})
-        OAS_prob.setup()
-        OAS_prob.run()
-        prob = OAS_prob.prob
-        self.assertAlmostEqual(prob['wing_perf.CL'], .46173591841167, places=5)
-        self.assertAlmostEqual(prob['tail_perf.CL'], .46173591841167, places=5)
-        self.assertAlmostEqual(prob['wing_perf.CD'], .005524603647, places=5)
-        self.assertAlmostEqual(prob['tail_perf.CD'], .005524603647, places=5)
-
-    def test_aero_analysis_flat_symmetry(self):
-        OAS_prob = OASProblem({'type' : 'aero',
-                               'optimize' : False})
-        surf_dict = {'symmetry' : True}
-        OAS_prob.add_surface(surf_dict)
-        OAS_prob.setup()
-        OAS_prob.run()
-        prob = OAS_prob.prob
-        self.assertAlmostEqual(prob['wing_perf.CL'], .45655138, places=5)
-
-    def test_aero_optimization_flat(self):
-        OAS_prob = OASProblem({'type' : 'aero',
-                               'optimize' : True})
-        OAS_prob.add_surface()
-        OAS_prob.setup()
-
-        OAS_prob.add_desvar('wing.twist_cp', lower=-10., upper=15.)
-        OAS_prob.add_desvar('wing.sweep', lower=10., upper=30.)
-        OAS_prob.add_desvar('wing.dihedral', lower=-10., upper=20.)
-        OAS_prob.add_desvar('wing.taper', lower=.5, upper=2.)
-        OAS_prob.add_constraint('wing_perf.CL', equals=0.5)
-        OAS_prob.add_objective('wing_perf.CD', scaler=1e4)
-
-        OAS_prob.run()
-        prob = OAS_prob.prob
-        self.assertAlmostEqual(prob['wing_perf.CD'], .004048702908627036, places=5)
+    # def test_aero_analysis_flat_multiple(self):
+    #     OAS_prob = OASProblem({'type' : 'aero',
+    #                            'optimize' : False})
+    #     OAS_prob.add_surface({'span_cos_spacing' : 0.})
+    #     OAS_prob.add_surface({'name' : 'tail',
+    #                           'span_cos_spacing' : 0.,
+    #                           'offset' : numpy.array([0., 0., 1000000.])})
+    #     OAS_prob.setup()
+    #     OAS_prob.run()
+    #     prob = OAS_prob.prob
+    #     self.assertAlmostEqual(prob['wing_perf.CL'], .46173591841167, places=5)
+    #     self.assertAlmostEqual(prob['tail_perf.CL'], .46173591841167, places=5)
+    #
+    # def test_aero_analysis_flat_side_by_side(self):
+    #     OAS_prob = OASProblem({'type' : 'aero',
+    #                            'optimize' : False})
+    #     OAS_prob.add_surface({'name' : 'wing',
+    #                           'span' : 5.,
+    #                           'num_y' : 3,
+    #                           'span_cos_spacing' : 0.,
+    #                           'offset' : numpy.array([0., -2.5, 0.])})
+    #     OAS_prob.add_surface({'name' : 'tail',
+    #                           'span' : 5.,
+    #                           'num_y' : 3,
+    #                           'span_cos_spacing' : 0.,
+    #                           'offset' : numpy.array([0., 2.5, 0.])})
+    #     OAS_prob.setup()
+    #     OAS_prob.run()
+    #     prob = OAS_prob.prob
+    #     self.assertAlmostEqual(prob['wing_perf.CL'], .46173591841167, places=5)
+    #     self.assertAlmostEqual(prob['tail_perf.CL'], .46173591841167, places=5)
+    #     self.assertAlmostEqual(prob['wing_perf.CD'], .005524603647, places=5)
+    #     self.assertAlmostEqual(prob['tail_perf.CD'], .005524603647, places=5)
+    #
+    # def test_aero_analysis_flat_symmetry(self):
+    #     OAS_prob = OASProblem({'type' : 'aero',
+    #                            'optimize' : False})
+    #     surf_dict = {'symmetry' : True}
+    #     OAS_prob.add_surface(surf_dict)
+    #     OAS_prob.setup()
+    #     OAS_prob.run()
+    #     prob = OAS_prob.prob
+    #     self.assertAlmostEqual(prob['wing_perf.CL'], .45655138, places=5)
+    #
+    # def test_aero_optimization_flat(self):
+    #     OAS_prob = OASProblem({'type' : 'aero',
+    #                            'optimize' : True})
+    #     OAS_prob.add_surface()
+    #     OAS_prob.setup()
+    #
+    #     OAS_prob.add_desvar('wing.twist_cp', lower=-10., upper=15.)
+    #     OAS_prob.add_desvar('wing.sweep', lower=10., upper=30.)
+    #     OAS_prob.add_desvar('wing.dihedral', lower=-10., upper=20.)
+    #     OAS_prob.add_desvar('wing.taper', lower=.5, upper=2.)
+    #     OAS_prob.add_constraint('wing_perf.CL', equals=0.5)
+    #     OAS_prob.add_objective('wing_perf.CD', scaler=1e4)
+    #
+    #     OAS_prob.run()
+    #     prob = OAS_prob.prob
+    #     self.assertAlmostEqual(prob['wing_perf.CD'], .004048702908627036, places=5)
 #
 #     def test_aero_multiple_opt(self):
 #         OAS_prob = OASProblem({'type' : 'aero',
