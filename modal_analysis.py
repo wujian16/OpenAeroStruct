@@ -29,14 +29,14 @@ if __name__ == "__main__":
     # Instantiate problem and add default surface
     OAS_prob = OASProblem(prob_dict)
     OAS_prob.add_surface({'name' : 'wing',
-                          'num_y' : 41,
+                          'num_y' : 201,
                           'num_x' : 5,
                           'symmetry' : True,
                           'span' : 32.,
                           'chord' : 1.,
                           'fem_origin' : 0.5,
                           'E' : 70.e9,
-                          'G' : 26923076923.1,
+                          'G' : 30.e9,
                           'mrho' : .75,
                           'W0' : 0.,
                           'span_cos_spacing' : 0.})

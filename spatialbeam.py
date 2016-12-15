@@ -11,6 +11,7 @@ numpy.random.seed(123)
 
 from openmdao.api import Component, Group
 from scipy.linalg import lu_factor, lu_solve
+import matplotlib.pyplot as plt
 
 try:
     import OAS_API
@@ -20,7 +21,6 @@ except:
 
 def view_mat(mat):
     """ Helper function used to visually examine matrices. """
-    import matplotlib.pyplot as plt
     if len(mat.shape) > 2:
         mat = numpy.sum(mat, axis=2)
     im = plt.imshow(mat.real, interpolation='none')
@@ -42,17 +42,25 @@ def radii(mesh, t_c=0.15):
     chords = 0.5 * chords[:-1] + 0.5 * chords[1:]
     return t_c * chords
 
-def order(evalues, evectors):
-	idx = numpy.imag(evalues).argsort()[::1]
-	eigenvalues = evalues[idx]
-	eigenvectors = evectors[:,idx]
-	return eigenvalues, eigenvectors
+def order_and_normalize(evalues, evectors, M):
+    idx = evalues.argsort()[::1]
+    eigenvalues = evalues[idx]
+    eigenvectors = evectors[:, idx]
+    for i, evec in enumerate(eigenvectors.T):
+        fac = 1. / evec.T.dot(M).dot(evec)
+        evec *= fac**.5
+    return eigenvalues, eigenvectors
 
-def Eig_matrix(M_array, K_array):
-	M = numpy.asmatrix(M_array)
-	K = numpy.asmatrix(K_array)
-	M_inv = numpy.linalg.inv(M)
-	return M_inv*K
+def Eig_matrix(M, K):
+    return numpy.linalg.inv(M).dot(K)
+
+def plot_eigs(evals, evecs, dof=0, num_modes=5):
+    fig = plt.figure()
+    lins = numpy.linspace(0, 1, len(evecs[:, 0])/6)
+    for mode in range(num_modes):
+        plt.plot(lins, evecs[dof::6, mode][::-1], label='Mode {}'.format(mode))
+    plt.legend(loc=0)
+    plt.show()
 
 
 def _assemble_system(nodes, A, J, Iy, Iz, loads,
@@ -86,6 +94,10 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
     rhs[:] = 0.0
     rhs[:6*n] = loads.reshape(n*6)
     rhs[numpy.abs(rhs) < 1e-6] = 0.
+
+    Iy[:] = 2000.e-12
+    Iz[:] = 2000.e-12
+    A[:] = 240.e-6
 
     # Dense Fortran
     if fortran_flag:
@@ -165,7 +177,7 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
             ###############
             # Mass matrix #
             ###############
-            mrhoAL = mrho * .00028274 * A[ielem] * L
+            mrhoAL = mrho * A[ielem] * L
             mrhoAL = 0.75 * L
             mrhoJL = mrho * J[ielem] * L	# (J = Iy + Iz)
             mrhoJL = 0.047 * L	# (J = Iy + Iz)
@@ -196,16 +208,16 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
             M[6*in1:6*in1+6, 6*in0:6*in0+6] += res[6:, :6]
             M[6*in0:6*in0+6, 6*in1:6*in1+6] += res[:6, 6:]
             M[6*in1:6*in1+6, 6*in1:6*in1+6] += res[6:, 6:]
-            
+
         # Include a scaled identity matrix in the rows and columns
         # corresponding to the structural constraints
         for ind in xrange(num_cons):
             for k in xrange(6):
-                K[:, 6*cons+k] = 0.
-                M[:, 6*cons+k] = 0.
+                K[6*cons+k, :] = 0.
+                M[6*cons+k, :] = 0.
 
-                K[6*cons+k, 6*cons+k] = 1.e5
-                K[6*cons+k, 6*cons+k] = 1.e5
+                K[6*cons+k, 6*cons+k] = 1.e8
+                K[6*cons+k, 6*cons+k] = 1.e8
                 M[6*cons+k, 6*cons+k] = 1.
                 M[6*cons+k, 6*cons+k] = 1.
 
@@ -263,7 +275,7 @@ class SpatialBeamFEM(Component):
         self.add_param('nodes', val=numpy.zeros((self.ny, 3)))
         self.add_param('loads', val=numpy.zeros((self.ny, 6)))
         self.add_state('disp', val=numpy.zeros((self.ny, 6), dtype="complex"))
-        self.add_output('evalues', val=numpy.zeros(((self.ny-1)*6)))
+        self.add_output('modes', val=numpy.zeros(((self.ny-1)*6, (self.ny-1)*6)))
         self.add_output('freqs', val=numpy.zeros(((self.ny-1)*6)))
 
         # self.deriv_options['type'] = 'cs'
@@ -386,19 +398,21 @@ class SpatialBeamFEM(Component):
         del_list = []
         for k in xrange(6):
             del_list.append(6*self.cons+k)
-        self.reduced_K = numpy.delete(self.K, del_list, axis=0)
+        self.reduced_K = numpy.delete(self.K.real, del_list, axis=0)
         self.reduced_K = numpy.delete(self.reduced_K, del_list, axis=1)
-        self.reduced_M = numpy.delete(self.M, del_list, axis=0)
+        self.reduced_M = numpy.delete(self.M.real, del_list, axis=0)
         self.reduced_M = numpy.delete(self.reduced_M, del_list, axis=1)
 
         # NO DAMPING
-        mat_for_eig_nodamp = Eig_matrix(self.reduced_M, self.reduced_K)
-        evalues, evectors = numpy.linalg.eig(-mat_for_eig_nodamp)
-        evalues_ord, evectors_ord = order(evalues, evectors)
-        frequencies = numpy.sqrt(-evalues)
+        mat_for_eig_nodamp = numpy.linalg.inv(self.reduced_M).dot(self.reduced_K)
+        evalues, evectors = numpy.linalg.eig(mat_for_eig_nodamp)
+        evalues_ord, evectors_ord = order_and_normalize(evalues, evectors, self.reduced_M)
+        frequencies = numpy.sqrt(evalues)
         freqs_ordered = numpy.sort(frequencies)
 
-        unknowns['evalues'] = evalues
+        plot_eigs(evalues_ord, evectors_ord)
+
+        unknowns['modes'] = evectors_ord
         unknowns['freqs'] = freqs_ordered
 
         # unknowns['dt'] = 1.#self.final_t / self.num_dt
