@@ -100,7 +100,7 @@
        ! As cgns does not support quadrupole precision, double
        ! precision is used instead.
 
-       real(kind=16), private :: dummyReal
+       real(kind=8), private :: dummyReal
 #ifndef USE_TAPENADE
        integer, parameter     :: sumb_real  = mpi_real16
 #endif

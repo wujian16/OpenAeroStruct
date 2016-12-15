@@ -21,11 +21,6 @@ if __name__ == "__main__":
     # Set problem type
     prob_dict = {'type' : 'struct'}
 
-    if sys.argv[1].startswith('0'):  # run analysis once
-        prob_dict.update({'optimize' : False})
-    else:  # perform optimization
-        prob_dict.update({'optimize' : True})
-
     # Instantiate problem and add default surface
     OAS_prob = OASProblem(prob_dict)
     OAS_prob.add_surface({'name' : 'wing',
@@ -37,18 +32,15 @@ if __name__ == "__main__":
                           'fem_origin' : 0.5,
                           'E' : 70.e9,
                           'G' : 30.e9,
-                          'mrho' : .75,
+                          'mrho' : 3.e3,
                           'W0' : 0.,
                           'span_cos_spacing' : 0.})
 
-    # Single lifting surface
-    if not sys.argv[1].endswith('m'):
-
-        # Setup problem and add design variables, constraint, and objective
-        OAS_prob.setup()
-        OAS_prob.add_desvar('wing.thickness_cp', lower=0.01, upper=0.25, scaler=1e2)
-        OAS_prob.add_constraint('wing.failure', upper=0.)
-        OAS_prob.add_objective('wing.weight', scaler=1e-3)
+    # Setup problem and add design variables, constraint, and objective
+    OAS_prob.setup()
+    OAS_prob.add_desvar('wing.thickness_cp', lower=0.01, upper=0.25, scaler=1e2)
+    OAS_prob.add_constraint('wing.failure', upper=0.)
+    OAS_prob.add_objective('wing.weight', scaler=1e-3)
 
 
     # Actually run the problem

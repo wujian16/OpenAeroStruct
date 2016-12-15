@@ -155,10 +155,11 @@ contains
 
   subroutine assemblestructmtx_main(n, tot_n_fem, nodes, A, J, Iy, Iz, & ! 6
     K_a, K_t, K_y, K_z, & ! 4
+    M_a, M_t, M_y, M_z, & ! 4
     elem_IDs, cons, & ! 3
     E, G, x_gl, T, & ! 3
-    K_elem, Pelem_a, Pelem_t, Pelem_y, Pelem_z, T_elem, & ! 6
-    const2, const_y, const_z, loads, K, x) ! 7
+    K_elem, M_elem, mrho, Pelem_a, Pelem_t, Pelem_y, Pelem_z, T_elem, & ! 6
+    const_K, const_Ky, const_Kz, const_M, const_My, const_Mz, loads, K, M, x) ! 7
 
     use solveRoutines, only: solve
     implicit none
@@ -169,21 +170,24 @@ contains
     real(kind=8), intent(in) :: nodes(tot_n_fem, 3), A(n-1), J(n-1), Iy(n-1), Iz(n-1)
     real(kind=8), intent(in) :: E(n-1), G(n-1), x_gl(3)
     real(kind=8), intent(inout) :: K_a(2, 2), K_t(2, 2), K_y(4, 4), K_z(4, 4)
-    real(kind=8), intent(inout) :: T(3, 3), K_elem(12, 12), T_elem(12, 12)
+    real(kind=8), intent(inout) :: M_a(2, 2), M_t(2, 2), M_y(4, 4), M_z(4, 4)
+    real(kind=8), intent(inout) :: T(3, 3), K_elem(12, 12), M_elem(12, 12), T_elem(12, 12)
     real(kind=8), intent(in) :: Pelem_a(2, 12), Pelem_t(2, 12), Pelem_y(4, 12), Pelem_z(4, 12)
-    real(kind=8), intent(in) :: const2(2, 2), const_y(4, 4), const_z(4, 4), loads(n, 6)
+    real(kind=8), intent(in) :: const_K(2, 2), const_Ky(4, 4), const_Kz(4, 4), mrho
+    real(kind=8), intent(in) :: const_M(2, 2), const_My(4, 4), const_Mz(4, 4), loads(n, 6)
 
     ! Output
-    real(kind=8), intent(out) :: x(6*n+6), K(6*n+6, 6*n+6)
+    real(kind=8), intent(out) :: x(6*n), K(6*n, 6*n), M(6*n, 6*n)
 
     ! Working
     real(kind=8) :: P0(3), P1(3), x_loc(3), y_loc(3), z_loc(3), x_cross(3), y_cross(3)
     real(kind=8) :: L, EA_L, GJ_L, EIy_L3, EIz_L3, res(12, 12)
     real(kind=8) :: mat12x12(12, 12), mat12x4(12, 4), mat12x2(12, 2)
     integer ::  num_elems, num_nodes, num_cons, ielem, in0, in1, ind, i
-    real(kind=8) :: Pelem_a_T(12, 2), Pelem_t_T(12, 2), K_(6*n+6, 6*n+6), rhs(6*n+6)
-    real(kind=8) :: Pelem_y_T(12, 4), Pelem_z_T(12, 4), T_elem_T(12, 12), b(6*n+6)
-    integer :: ipiv(6*n+6), n_solve
+    real(kind=8) :: Pelem_a_T(12, 2), Pelem_t_T(12, 2), K_(6*n, 6*n), rhs(6*n)
+    real(kind=8) :: Pelem_y_T(12, 4), Pelem_z_T(12, 4), T_elem_T(12, 12), b(6*n)
+    real(kind=8) :: mrhoAL, mrhoJL
+    integer :: ipiv(6*n), n_solve
 
 
     num_elems = n - 1
@@ -198,6 +202,8 @@ contains
     end do
 
     K(:, :) = 0.
+    M(:, :) = 0.
+
     do ielem = 1, num_elems ! loop over num elements
       P0 = nodes(elem_IDs(ielem, 1), :)
       P1 = nodes(elem_IDs(ielem, 2), :)
@@ -217,21 +223,23 @@ contains
       end do
 
       call norm(P1 - P0, L)
+
+      !!! Stiffness matrix computations
       EA_L = E(ielem) * A(ielem) / L
       GJ_L = G(ielem) * J(ielem) / L
       EIy_L3 = E(ielem) * Iy(ielem) / L**3
       EIz_L3 = E(ielem) * Iz(ielem) / L**3
 
-      K_a(:, :) = EA_L * const2
-      K_t(:, :) = GJ_L * const2
+      K_a(:, :) = EA_L * const_K
+      K_t(:, :) = GJ_L * const_K
 
-      K_y(:, :) = EIy_L3 * const_y
+      K_y(:, :) = EIy_L3 * const_Ky
       K_y(2, :) = K_y(2, :) * L
       K_y(4, :) = K_y(4, :) * L
       K_y(:, 2) = K_y(:, 2) * L
       K_y(:, 4) = K_y(:, 4) * L
 
-      K_z(:, :) = EIz_L3 * const_z
+      K_z(:, :) = EIz_L3 * const_Kz
       K_z(2, :) = K_z(2, :) * L
       K_z(4, :) = K_z(4, :) * L
       K_z(:, 2) = K_z(:, 2) * L
@@ -277,14 +285,73 @@ contains
       K(6*(in1-1)+1:6*(in1-1)+6, 6*(in1-1)+1:6*(in1-1)+6) = &
       K(6*(in1-1)+1:6*(in1-1)+6, 6*(in1-1)+1:6*(in1-1)+6) + res(7:, 7:)
 
+      !!! Mass matrix computations
+      mrhoAL = mrho * A(ielem) * L
+      mrhoJL = mrho * J(ielem) * L
+
+      M_a(:, :) = mrhoAL * const_M
+      M_t(:, :) = mrhoJL * const_M
+
+      M_y(:, :) = mrhoAL * const_My / 420
+      M_y(2, :) = M_y(2, :) * L
+      M_y(4, :) = M_y(4, :) * L
+      M_y(:, 2) = M_y(:, 2) * L
+      M_y(:, 4) = M_y(:, 4) * L
+
+      M_z(:, :) = mrhoAL * const_Mz / 420
+      M_z(2, :) = M_z(2, :) * L
+      M_z(4, :) = M_z(4, :) * L
+      M_z(:, 2) = M_z(:, 2) * L
+      M_z(:, 4) = M_z(:, 4) * L
+
+      M_elem(:, :) = 0.
+      call transpose2(2, 12, Pelem_a, Pelem_a_T)
+      call matmul2(12, 2, 2, Pelem_a_T, M_a, mat12x2)
+      call matmul2(12, 2, 12, mat12x2, Pelem_a, res)
+      M_elem = M_elem + res
+
+      call transpose2(2, 12, Pelem_t, Pelem_t_T)
+      call matmul2(12, 2, 2, Pelem_t_T, M_t, mat12x2)
+      call matmul2(12, 2, 12, mat12x2, Pelem_t, res)
+      M_elem = M_elem + res
+
+      call transpose2(4, 12, Pelem_y, Pelem_y_T)
+      call matmul2(12, 4, 4, Pelem_y_T, M_y, mat12x4)
+      call matmul2(12, 4, 12, mat12x4, Pelem_y, res)
+      M_elem = M_elem + res
+
+      call transpose2(4, 12, Pelem_z, Pelem_z_T)
+      call matmul2(12, 4, 4, Pelem_z_T, M_z, mat12x4)
+      call matmul2(12, 4, 12, mat12x4, Pelem_z, res)
+      M_elem = M_elem + res
+
+      call transpose2(12, 12, T_elem, T_elem_T)
+      call matmul2(12, 12, 12, T_elem_T, M_elem, mat12x12)
+      call matmul2(12, 12, 12, mat12x12, T_elem, res)
+
+      M(6*(in0-1)+1:6*(in0-1)+6, 6*(in0-1)+1:6*(in0-1)+6) = &
+      M(6*(in0-1)+1:6*(in0-1)+6, 6*(in0-1)+1:6*(in0-1)+6) + res(:6, :6)
+
+      M(6*(in1-1)+1:6*(in1-1)+6, 6*(in0-1)+1:6*(in0-1)+6) = &
+      M(6*(in1-1)+1:6*(in1-1)+6, 6*(in0-1)+1:6*(in0-1)+6) + res(7:, :6)
+
+      M(6*(in0-1)+1:6*(in0-1)+6, 6*(in1-1)+1:6*(in1-1)+6) = &
+      M(6*(in0-1)+1:6*(in0-1)+6, 6*(in1-1)+1:6*(in1-1)+6) + res(:6, 7:)
+
+      M(6*(in1-1)+1:6*(in1-1)+6, 6*(in1-1)+1:6*(in1-1)+6) = &
+      M(6*(in1-1)+1:6*(in1-1)+6, 6*(in1-1)+1:6*(in1-1)+6) + res(7:, 7:)
+
     end do
 
     do i = 1, 6
-      K(6*num_nodes+i, 6*cons+i) = 10**9.
-      K(6*cons+i, 6*num_nodes+i) = 10**9.
+      K(6*cons+i, :) = 0.
+      M(6*cons+i, :) = 0.
+
+      K(6*cons+i, 6*cons+i) = 10**8.
+      M(6*cons+i, 6*cons+i) = 1.
     end do
 
-    n_solve = 6*n+6
+    n_solve = 6*n
     b = rhs
     K_ = K
 

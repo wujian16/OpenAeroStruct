@@ -7,17 +7,18 @@ contains
 
   subroutine assemblestructmtx(n, tot_n_fem, nodes, A, J, Iy, Iz, & ! 6
     K_a, K_t, K_y, K_z, & ! 4
+    M_a, M_t, M_y, M_z, & ! 4
     elem_IDs, cons, & ! 3
     E, G, x_gl, T, & ! 3
-    K_elem, Pelem_a, Pelem_t, Pelem_y, Pelem_z, T_elem, & ! 6
-    const2, const_y, const_z, loads, K, x) ! 7
+    K_elem, M_elem, mrho, Pelem_a, Pelem_t, Pelem_y, Pelem_z, T_elem, & ! 6
+    const_K, const_Ky, const_Kz, const_M, const_My, const_Mz, loads, K, M, x) ! 7
 
     implicit none
 
-    !f2py intent(in)   n, tot_n_fem, elem_IDs, cons, nodes, A, J, Iy, Iz, E, G, x_gl, K_a, K_t, K_y, K_z, T, K_elem, Pelem_a, Pelem_t, Pelem_y, Pelem_z, T_elem, const2, const_y, const_z, loads
-    !f2py intent(out) K, x
+    !f2py intent(in)   n, tot_n_fem, elem_IDs, cons, nodes, A, J, Iy, Iz, E, G, x_gl, K_a, K_t, K_y, K_z, M_a, M_t, M_y, M_z, T, K_elem, M_elem, mrho, Pelem_a, Pelem_t, Pelem_y, Pelem_z, T_elem, const_K, const_Ky, const_Kz, const_M, const_My, const_Mz, loads
+    !f2py intent(out) K, M, x
     !f2py depends(tot_n_fem) nodes
-    !f2py depends(n) elem_IDs, nodes, A, J, Iy, Iz, E, G, loads, K, x
+    !f2py depends(n) elem_IDs, nodes, A, J, Iy, Iz, E, G, loads, K, M, x
 
     ! Input
     integer, intent(in) :: n, cons, tot_n_fem
@@ -25,19 +26,22 @@ contains
     real(kind=8), intent(in) :: nodes(tot_n_fem, 3), A(n-1), J(n-1), Iy(n-1), Iz(n-1)
     real(kind=8), intent(in) :: E(n-1), G(n-1), x_gl(3)
     real(kind=8), intent(inout) :: K_a(2, 2), K_t(2, 2), K_y(4, 4), K_z(4, 4)
-    real(kind=8), intent(inout) :: T(3, 3), K_elem(12, 12), T_elem(12, 12)
+    real(kind=8), intent(inout) :: M_a(2, 2), M_t(2, 2), M_y(4, 4), M_z(4, 4)
+    real(kind=8), intent(inout) :: T(3, 3), K_elem(12, 12), M_elem(12, 12), T_elem(12, 12)
     real(kind=8), intent(in) :: Pelem_a(2, 12), Pelem_t(2, 12), Pelem_y(4, 12), Pelem_z(4, 12)
-    real(kind=8), intent(in) :: const2(2, 2), const_y(4, 4), const_z(4, 4), loads(n, 6)
+    real(kind=8), intent(in) :: const_K(2, 2), const_Ky(4, 4), const_Kz(4, 4), mrho
+    real(kind=8), intent(in) :: const_M(2, 2), const_My(4, 4), const_Mz(4, 4), loads(n, 6)
 
     ! Output
-    real(kind=8), intent(out) :: x(6*n+6), K(6*n+6, 6*n+6)
+    real(kind=8), intent(out) :: x(6*n), K(6*n, 6*n), M(6*n, 6*n)
 
     call assemblestructmtx_main(n, tot_n_fem, nodes, A, J, Iy, Iz, &
-      K_a, K_t, K_y, K_z, &
+    K_a, K_t, K_y, K_z, &
+    M_a, M_t, M_y, M_z, &
       elem_IDs, cons, &
       E, G, x_gl, T, &
-      K_elem, Pelem_a, Pelem_t, Pelem_y, Pelem_z, T_elem, &
-      const2, const_y, const_z, loads, K, x)
+      K_elem, M_elem, mrho, Pelem_a, Pelem_t, Pelem_y, Pelem_z, T_elem, &
+      const_K, const_Ky, const_Kz, const_M, const_My, const_Mz, loads, K, M, x)
 
   end subroutine assemblestructmtx
 

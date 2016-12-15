@@ -5,7 +5,7 @@ python module OAS_API ! in
     interface  ! in :OAS_API
         module oas_api ! in :OAS_API:OAS_API.F90
             use oas_main
-            subroutine assemblestructmtx(n,tot_n_fem,nodes,a,j,iy,iz,k_a,k_t,k_y,k_z,elem_ids,cons,e,g,x_gl,t,k_elem,pelem_a,pelem_t,pelem_y,pelem_z,t_elem,const2,const_y,const_z,loads,k,x) ! in :OAS_API:OAS_API.F90:oas_api
+            subroutine assemblestructmtx(n,tot_n_fem,nodes,a,j,iy,iz,k_a,k_t,k_y,k_z,m_a,m_t,m_y,m_z,elem_ids,cons,e,g,x_gl,t,k_elem,m_elem,mrho,pelem_a,pelem_t,pelem_y,pelem_z,t_elem,const_k,const_ky,const_kz,const_m,const_my,const_mz,loads,k,m,x) ! in :OAS_API:OAS_API.F90:oas_api
                 integer, optional,intent(in),check((len(a)+1)>=n),depend(a) :: n=(len(a)+1)
                 integer, optional,intent(in),check(shape(nodes,0)==tot_n_fem),depend(nodes) :: tot_n_fem=shape(nodes,0)
                 real(kind=8) dimension(tot_n_fem,3),intent(in) :: nodes
@@ -17,6 +17,10 @@ python module OAS_API ! in
                 real(kind=8) dimension(2,2),intent(in) :: k_t
                 real(kind=8) dimension(4,4),intent(in) :: k_y
                 real(kind=8) dimension(4,4),intent(in) :: k_z
+                real(kind=8) dimension(2,2),intent(in) :: m_a
+                real(kind=8) dimension(2,2),intent(in) :: m_t
+                real(kind=8) dimension(4,4),intent(in) :: m_y
+                real(kind=8) dimension(4,4),intent(in) :: m_z
                 integer dimension(n - 1,2),intent(in),depend(n) :: elem_ids
                 integer intent(in) :: cons
                 real(kind=8) dimension(n - 1),intent(in),depend(n) :: e
@@ -24,17 +28,23 @@ python module OAS_API ! in
                 real(kind=8) dimension(3),intent(in) :: x_gl
                 real(kind=8) dimension(3,3),intent(in) :: t
                 real(kind=8) dimension(12,12),intent(in) :: k_elem
+                real(kind=8) dimension(12,12),intent(in) :: m_elem
+                real(kind=8) intent(in) :: mrho
                 real(kind=8) dimension(2,12),intent(in) :: pelem_a
                 real(kind=8) dimension(2,12),intent(in) :: pelem_t
                 real(kind=8) dimension(4,12),intent(in) :: pelem_y
                 real(kind=8) dimension(4,12),intent(in) :: pelem_z
                 real(kind=8) dimension(12,12),intent(in) :: t_elem
-                real(kind=8) dimension(2,2),intent(in) :: const2
-                real(kind=8) dimension(4,4),intent(in) :: const_y
-                real(kind=8) dimension(4,4),intent(in) :: const_z
+                real(kind=8) dimension(2,2),intent(in) :: const_k
+                real(kind=8) dimension(4,4),intent(in) :: const_ky
+                real(kind=8) dimension(4,4),intent(in) :: const_kz
+                real(kind=8) dimension(2,2),intent(in) :: const_m
+                real(kind=8) dimension(4,4),intent(in) :: const_my
+                real(kind=8) dimension(4,4),intent(in) :: const_mz
                 real(kind=8) dimension(n,6),intent(in),depend(n) :: loads
-                real(kind=8) dimension(6 * n + 6,6 * n + 6),intent(out),depend(n,n) :: k
-                real(kind=8) dimension(6 * n + 6),intent(out),depend(n) :: x
+                real(kind=8) dimension(6 * n,6 * n),intent(out),depend(n,n) :: k
+                real(kind=8) dimension(6 * n,6 * n),intent(out),depend(n,n) :: m
+                real(kind=8) dimension(6 * n),intent(out),depend(n) :: x
             end subroutine assemblestructmtx
             subroutine assemblestructmtx_d(n,tot_n_fem,nodes,nodesd,a,ad,j,jd,iy,iyd,iz,izd,k_a,k_t,k_y,k_z,elem_ids,cons,e,g,x_gl,t,k_elem,pelem_a,pelem_t,pelem_y,pelem_z,t_elem,const2,const_y,const_z,loads,loadsd,k,kd,x,xd) ! in :OAS_API:OAS_API.F90:oas_api
                 use oas_main_d, only: assemblestructmtx_main_d

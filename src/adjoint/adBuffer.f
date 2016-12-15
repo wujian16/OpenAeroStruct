@@ -933,9 +933,9 @@ c
       ENDIF
       END
 
-c======================= complex(kind=16) =========================
+c======================= complex(kind=8) =========================
       BLOCK DATA COMPLEXS16
-      complex(kind=16) adc16buf(512), adc16lbuf(512)
+      complex(kind=8) adc16buf(512), adc16lbuf(512)
       INTEGER adc16ibuf,adc16ilbuf
       LOGICAL adc16inlbuf
       COMMON /adc16fbuf/adc16buf,adc16lbuf,
@@ -946,7 +946,7 @@ c======================= complex(kind=16) =========================
       END
 
       SUBROUTINE PUSHCOMPLEX16(x)
-      complex(kind=16) x, adc16buf(512), adc16lbuf(512)
+      complex(kind=8) x, adc16buf(512), adc16lbuf(512)
       INTEGER adc16ibuf,adc16ilbuf
       LOGICAL adc16inlbuf
       COMMON /adc16fbuf/adc16buf,adc16lbuf,
@@ -972,7 +972,7 @@ c
       END
 
       SUBROUTINE LOOKCOMPLEX16(x)
-      complex(kind=16) x, adc16buf(512), adc16lbuf(512)
+      complex(kind=8) x, adc16buf(512), adc16lbuf(512)
       INTEGER adc16ibuf,adc16ilbuf
       LOGICAL adc16inlbuf
       COMMON /adc16fbuf/adc16buf,adc16lbuf,
@@ -1003,7 +1003,7 @@ c
       END
 
       SUBROUTINE POPCOMPLEX16(x)
-      complex(kind=16) x, adc16buf(512), adc16lbuf(512)
+      complex(kind=8) x, adc16buf(512), adc16lbuf(512)
       INTEGER adc16ibuf,adc16ilbuf
       LOGICAL adc16inlbuf
       COMMON /adc16fbuf/adc16buf,adc16lbuf,
@@ -1229,7 +1229,7 @@ c          +       adc4ibuf,adc4ilbuf,adc4inlbuf
       LOGICAL adc8inlbuf
       COMMON /adc8fbuf/adc8buf,adc8lbuf,
      +       adc8ibuf,adc8ilbuf,adc8inlbuf
-      complex(kind=16) adc16buf(512), adc16lbuf(512)
+      complex(kind=8) adc16buf(512), adc16lbuf(512)
       INTEGER adc16ibuf,adc16ilbuf
       LOGICAL adc16inlbuf
       COMMON /adc16fbuf/adc16buf,adc16lbuf,
@@ -1316,7 +1316,7 @@ c          +       adc4ibuf,adc4ilbuf,adc4inlbuf
       LOGICAL adc8inlbuf
       COMMON /adc8fbuf/adc8buf,adc8lbuf,
      +       adc8ibuf,adc8ilbuf,adc8inlbuf
-      complex(kind=16) adc16buf(512), adc16lbuf(512)
+      complex(kind=8) adc16buf(512), adc16lbuf(512)
       INTEGER adc16ibuf,adc16ilbuf
       LOGICAL adc16inlbuf
       COMMON /adc16fbuf/adc16buf,adc16lbuf,
@@ -1423,7 +1423,7 @@ c          +       adr16ibuf,adr16ilbuf,adr16inlbuf
       LOGICAL adc8inlbuf
       COMMON /adc8fbuf/adc8buf,adc8lbuf,
      +       adc8ibuf,adc8ilbuf,adc8inlbuf
-      complex(kind=16) adc16buf(512), adc16lbuf(512)
+      complex(kind=8) adc16buf(512), adc16lbuf(512)
       INTEGER adc16ibuf,adc16ilbuf
       LOGICAL adc16inlbuf
       COMMON /adc16fbuf/adc16buf,adc16lbuf,

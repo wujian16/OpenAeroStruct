@@ -13,6 +13,8 @@ from openmdao.api import Component, Group
 from scipy.linalg import lu_factor, lu_solve
 import matplotlib.pyplot as plt
 
+import OAS_API
+
 try:
     import OAS_API
     fortran_flag = True
@@ -69,16 +71,12 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
                      elem_IDs, cons,
                      E, G, x_gl, T,
                      K_elem, M_elem, mrho, S_a, S_t, S_y, S_z, T_elem,
-                     const_K, const_y, const_z, const_M, const_yy, const_zz,
+                     const_K, const_Ky, const_Kz, const_M, const_My, const_Mz,
                      n, size, K, M, rhs):
 
     """
     Assemble the structural stiffness matrix based on 6 degrees of freedom
-    per element.
-
-    Can be run in dense Fortran or dense
-    Python code depending on the flags used. Currently, dense Fortran
-    seems to be the fastest version across many matrix sizes.
+    per element. Can be run in dense Fortran or dense Python code.
 
     """
 
@@ -95,18 +93,16 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
     rhs[:6*n] = loads.reshape(n*6)
     rhs[numpy.abs(rhs) < 1e-6] = 0.
 
-    Iy[:] = 2000.e-12
-    Iz[:] = 2000.e-12
-    A[:] = 240.e-6
-
     # Dense Fortran
     if fortran_flag:
-        K, x = OAS_API.oas_api.assemblestructmtx(nodes, A, J, Iy, Iz,
+        print 'fortran'
+        K, M, x = OAS_API.oas_api.assemblestructmtx(nodes, A, J, Iy, Iz,
                                      K_a, K_t, K_y, K_z,
+                                     M_a, M_t, M_y, M_z,
                                      elem_IDs+1, cons,
                                      E_vec, G_vec, x_gl, T,
-                                     K_elem, S_a, S_t, S_y, S_z, T_elem,
-                                     const_K, const_y, const_z, loads)
+                                     K_elem, M_elem, mrho, S_a, S_t, S_y, S_z, T_elem,
+                                     const_K, const_Ky, const_Kz, const_M, const_My, const_Mz, loads)
 
     # Dense Python
     else:
@@ -136,22 +132,22 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
             L = norm(P1 - P0)
             EA_L = E_vec[ielem] * A[ielem] / L
             GJ_L = G_vec[ielem] * J[ielem] / L
-            GJ_L = 1.e4 / L
+            # GJ_L = 1.e4 / L
             EIy_L3 = E_vec[ielem] * Iy[ielem] / L**3
-            EIy_L3 = 2.e4 / L**3
+            # EIy_L3 = 2.e4 / L**3
             EIz_L3 = E_vec[ielem] * Iz[ielem] / L**3
-            EIz_L3 = 4.e6 / L**3
+            # EIz_L3 = 4.e6 / L**3
 
             K_a[:, :] = EA_L * const_K
             K_t[:, :] = GJ_L * const_K
 
-            K_y[:, :] = EIy_L3 * const_y
+            K_y[:, :] = EIy_L3 * const_Ky
             K_y[1, :] *= L
             K_y[3, :] *= L
             K_y[:, 1] *= L
             K_y[:, 3] *= L
 
-            K_z[:, :] = EIz_L3 * const_z
+            K_z[:, :] = EIz_L3 * const_Kz
             K_z[1, :] *= L
             K_z[3, :] *= L
             K_z[:, 1] *= L
@@ -178,19 +174,19 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
             # Mass matrix #
             ###############
             mrhoAL = mrho * A[ielem] * L
-            mrhoAL = 0.75 * L
+            # mrhoAL = 0.75 * L
             mrhoJL = mrho * J[ielem] * L	# (J = Iy + Iz)
-            mrhoJL = 0.047 * L	# (J = Iy + Iz)
+            # mrhoJL = 0.047 * L	# (J = Iy + Iz)
             M_a[:, :] = mrhoAL * const_M
             M_t[:, :] = mrhoJL * const_M
 
-            M_y[:, :] = mrhoAL * const_yy / 420
+            M_y[:, :] = mrhoAL * const_My / 420.
             M_y[1, :] *= L
             M_y[3, :] *= L
             M_y[:, 1] *= L
             M_y[:, 3] *= L
 
-            M_z[:, :] = mrhoAL * const_zz / 420
+            M_z[:, :] = mrhoAL * const_Mz / 420.
             M_z[1, :] *= L
             M_z[3, :] *= L
             M_z[:, 1] *= L
@@ -217,8 +213,6 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
                 M[6*cons+k, :] = 0.
 
                 K[6*cons+k, 6*cons+k] = 1.e8
-                K[6*cons+k, 6*cons+k] = 1.e8
-                M[6*cons+k, 6*cons+k] = 1.
                 M[6*cons+k, 6*cons+k] = 1.
 
     # Check to solve on the Python level if not done on the Fortran level
@@ -296,13 +290,13 @@ class SpatialBeamFEM(Component):
             [1, -1],
             [-1, 1],
         ], dtype='complex')
-        self.const_y = numpy.array([
+        self.const_Ky = numpy.array([
             [12, -6, -12, -6],
             [-6, 4, 6, 2],
             [-12, 6, 12, 6],
             [-6, 2, 6, 4],
         ], dtype='complex')
-        self.const_z = numpy.array([
+        self.const_Kz = numpy.array([
             [12, 6, -12, 6],
             [6, 4, -6, 2],
             [-12, -6, 12, -6],
@@ -331,11 +325,11 @@ class SpatialBeamFEM(Component):
 
         self.const_M = numpy.array([[1/3, 1/6],
                                    [1/6, 1/3],], dtype='complex')
-        self.const_yy = numpy.array([[156,-22, 54, 13],
+        self.const_My = numpy.array([[156,-22, 54, 13],
                                      [-22,  4,-13, -3],
                                      [ 54,-13,156, 22],
                                      [ 13, -3, 22,  4],], dtype='complex')
-        self.const_zz = numpy.array([[156, 22, 54,-13],
+        self.const_Mz = numpy.array([[156, 22, 54,-13],
                                      [ 22,  4, 13, -3],
                                      [ 54, 13,156,-22],
                                      [-13, -3,-22,  4],], dtype='complex')
@@ -388,9 +382,9 @@ class SpatialBeamFEM(Component):
                              self.E, self.G, self.x_gl, self.T, self.K_elem,
                              self.M_elem, mrho,
                              self.S_a, self.S_t, self.S_y, self.S_z,
-                             self.T_elem, self.const_K, self.const_y,
-                             self.const_z, self.const_M, self.const_yy,
-                             self.const_zz, self.ny, self.size,
+                             self.T_elem, self.const_K, self.const_Ky,
+                             self.const_Kz, self.const_M, self.const_My,
+                             self.const_Mz, self.ny, self.size,
                              self.K, self.M, self.rhs)
 
         unknowns['disp'] = self.x.reshape(-1, 6)
@@ -431,8 +425,8 @@ class SpatialBeamFEM(Component):
                              self.E, self.G, self.x_gl, self.T, self.K_elem,
                              self.M_elem, mrho,
                              self.S_a, self.S_t, self.S_y, self.S_z,
-                             self.T_elem, self.const_K, self.const_y,
-                             self.const_z, self.const_M, self.const_yy, self.const_zz,
+                             self.T_elem, self.const_K, self.const_Ky,
+                             self.const_Kz, self.const_M, self.const_My, self.const_Mz,
                              self.ny, self.size, self.K, self.M, self.rhs)
 
         disp = unknowns['disp'].reshape(-1)

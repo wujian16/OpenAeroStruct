@@ -10,7 +10,7 @@
 
 SUBDIR_SRC    = src/common \
 		src/adjoint \
-		src/OAS \
+		src/OAS
 
 default:
 # Check if the config.mk file is in the config dir.
