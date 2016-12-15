@@ -120,8 +120,7 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
         derivative of v w.r.t. circulations.
     """
 
-    # AVL uses alpha = 0 for the trailing vortices
-    alpha = 0.#params['alpha']
+    alpha = params['alpha']
     mtx[:, :, :] = 0.0
     cosa = numpy.cos(alpha * numpy.pi / 180.)
     sina = numpy.sin(alpha * numpy.pi / 180.)
@@ -144,6 +143,8 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
         n_bpts_ = (nx_ - 1) * ny_
         n_panels_ = (nx_ - 1) * (ny_ - 1)
 
+        # Obtain the lifting surface mesh in the form expected by the solver,
+        # with shape [nx_, ny_, 3]
         mesh = params[name_+'def_mesh']
         bpts = params[name_+'b_pts']
 
@@ -168,12 +169,10 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
             # midpoints of the bound vortices.
             if skip:
                 # Find the midpoints of the bound points, used in drag computations
-                pts = (params[name+'b_pts'][:-1, 1:, :] + \
-                    params[name+'b_pts'][:-1, :-1, :]) / 2
+                pts = (params[name+'b_pts'][:, 1:, :] + \
+                    params[name+'b_pts'][:, :-1, :]) / 2
             else:
                 pts = params[name+'c_pts']
-
-            rings_mesh = bpts
 
             # Initialize sub-matrix to populate within full mtx
             small_mat = numpy.zeros((n_panels, n_panels_, 3), dtype='complex')
@@ -184,64 +183,243 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                                                          mesh, skip, symmetry)
             # Python matrix assembly
             else:
-                m_nx = rings_mesh.shape[0]
-                m_ny = rings_mesh.shape[1]
-                c_nx = pts.shape[0]
-                c_ny = pts.shape[1]
+                # Spanwise loop through horseshoe elements
+                for el_j in xrange(ny_ - 1):
+                    el_loc_j = el_j * (nx_ - 1)
+                    C_te = mesh[-1, el_j + 1, :]
+                    D_te = mesh[-1, el_j + 0, :]
 
-                # Chordwise loop through points
-                for cp_i in xrange(c_nx):
-                    cp_loc_i = cp_i * (c_ny)
+                    # Mirror the horseshoe vortex points
+                    if symmetry:
+                        C_te_sym = C_te.copy()
+                        D_te_sym = D_te.copy()
+                        C_te_sym[1] = -C_te_sym[1]
+                        D_te_sym[1] = -D_te_sym[1]
 
-                    # Spanwise loop through points
-                    for cp_j in xrange(c_ny):
-                        cp_loc = cp_j + cp_loc_i
+                    # Spanwise loop through control points
+                    for cp_j in xrange(ny - 1):
+                        cp_loc_j = cp_j * (nx - 1)
 
-                        P = pts[cp_i, cp_j]                              # local point
+                        # Chordwise loop through control points
+                        for cp_i in xrange(nx - 1):
+                            cp_loc = cp_i + cp_loc_j
 
-                        # Chordwise loop through ring elements
-                        for el_i in xrange(m_nx - 1):
-                            el_loc_i = el_i * (m_ny - 1)
+                            P = pts[cp_i, cp_j]
 
-                            # Spanwise loop through ring elements
-                            for el_j in xrange(m_ny - 1):
-                                el_loc = el_j + el_loc_i                    # local ring element
+                            r1 = P - D_te
+                            r2 = P - C_te
 
-                                A = rings_mesh[el_i, el_j + 0, :]           # ring element corners
-                                B = rings_mesh[el_i, el_j + 1, :]
-                                C = rings_mesh[el_i + 1, el_j + 1, :]
-                                D = rings_mesh[el_i + 1, el_j + 0, :]
+                            r1_mag = norm(r1)
+                            r2_mag = norm(r2)
 
-                                AB_vort = _calc_vorticity(A, B, P)           # vortex segments
-                                BC_vort = _calc_vorticity(B, C, P)
-                                CD_vort = _calc_vorticity(C, D, P)
-                                DA_vort = _calc_vorticity(D, A, P)
+                            t1 = numpy.cross(u, r2) / \
+                                (r2_mag * (r2_mag - u.dot(r2)))
+                            t3 = numpy.cross(u, r1) / \
+                                (r1_mag * (r1_mag - u.dot(r1)))
 
-                                if symmetry:
-                    				# Influence of the other half wing (simmetry)
-                    				sym = numpy.array([1., -1., 1.])
-                    				P_sym = P * sym
+                            # AIC contribution from trailing vortex filaments
+                            # coming off the trailing edge
+                            trailing = t1 - t3
 
-                    				AB_vort_sym = _calc_vorticity(A, B, P_sym) * sym
-                    				BC_vort_sym = _calc_vorticity(B, C, P_sym) * sym
-                    				CD_vort_sym = _calc_vorticity(C, D, P_sym) * sym
-                    				DA_vort_sym = _calc_vorticity(D, A, P_sym) * sym
+                            # Calculate the effects across the symmetry plane
+                            if symmetry:
+                                r1 = P - D_te_sym
+                                r2 = P - C_te_sym
 
-                                if skip:
-                                    small_mat[cp_loc, el_loc, :] = BC_vort + DA_vort
-                                    if symmetry:
-                                        small_mat[cp_loc, el_loc, :] += BC_vort_sym + DA_vort_sym
-                                    # Add influence of latest unsteady wake element
-                                    # (only in b_mtx, for induced drag computation)
-                                    if (el_i == m_nx - 2):
-                                    	small_mat[cp_loc, el_loc, :] += CD_vort
-                                        if symmetry:
-                                            small_mat[cp_loc, el_loc, :] += CD_vort_sym
+                                r1_mag = norm(r1)
+                                r2_mag = norm(r2)
+
+                                t1 = numpy.cross(u, r2) / \
+                                    (r2_mag * (r2_mag - u.dot(r2)))
+                                t3 = numpy.cross(u, r1) / \
+                                    (r1_mag * (r1_mag - u.dot(r1)))
+
+                                trailing += t3 - t1
+
+                            edges = 0
+
+                            # Chordwise loop through horseshoe elements in
+                            # reversed order, starting with the panel closest
+                            # to the leading edge. This is done to sum the
+                            # AIC contributions from the side vortex filaments
+                            # as we loop through the elements
+                            for el_i in reversed(xrange(nx_ - 1)):
+                                el_loc = el_i + el_loc_j
+
+                                A = bpts[el_i, el_j + 0, :]
+                                B = bpts[el_i, el_j + 1, :]
+
+                                # Check if this is the last panel; if so, use
+                                # the trailing edge mesh points for C & D, else
+                                # use the directly aft panel's bound points
+                                # for C & D
+                                if el_i == nx_ - 2:
+                                    C = mesh[-1, el_j + 1, :]
+                                    D = mesh[-1, el_j + 0, :]
                                 else:
-                                    # Computation of the influence coefficient that links the point with the element
-                                    small_mat[cp_loc, el_loc, :] = AB_vort + BC_vort + CD_vort + DA_vort
+                                    C = bpts[el_i + 1, el_j + 1, :]
+                                    D = bpts[el_i + 1, el_j + 0, :]
+
+                                # Calculate and store the contributions from
+                                # the vortex filaments on the sides of the
+                                # panels, adding as we progress through the
+                                # panels
+                                edges += _calc_vorticity(B, C, P)
+                                edges += _calc_vorticity(D, A, P)
+
+                                # Mirror the horseshoe vortex points and
+                                # calculate the effects across
+                                # the symmetry plane
+                                if symmetry:
+                                    A_sym = A.copy()
+                                    B_sym = B.copy()
+                                    C_sym = C.copy()
+                                    D_sym = D.copy()
+                                    A_sym[1] = -A_sym[1]
+                                    B_sym[1] = -B_sym[1]
+                                    C_sym[1] = -C_sym[1]
+                                    D_sym[1] = -D_sym[1]
+
+                                    edges += _calc_vorticity(C_sym, B_sym, P)
+                                    edges += _calc_vorticity(A_sym, D_sym, P)
+
+                                # If skip, do not include the contributions
+                                # from the panel's bound vortex filament, as
+                                # this causes a singularity when we're taking
+                                # the influence of a panel on its own
+                                # collocation point. This true for the drag
+                                # computation and false for circulation
+                                # computation, due to the different collocation
+                                # points.
+                                if skip and el_loc == cp_loc:
                                     if symmetry:
-                                        small_mat[cp_loc, el_loc, :] += AB_vort_sym + BC_vort_sym + CD_vort_sym + DA_vort_sym
+                                        bound = _calc_vorticity(B_sym, A_sym, P)
+                                    else:
+                                        bound = numpy.zeros((3))
+                                    small_mat[cp_loc, el_loc, :] = \
+                                        trailing + edges + bound
+                                else:
+                                    bound = _calc_vorticity(A, B, P)
+
+                                    # Account for symmetry by including the
+                                    # mirrored bound vortex
+                                    if symmetry:
+                                        bound += _calc_vorticity(B_sym, A_sym, P)
+
+                                    small_mat[cp_loc, el_loc, :] = \
+                                        trailing + edges + bound
+
+            # Populate the full-size matrix with these surface-surface AICs
+            mtx[i_panels:i_panels+n_panels,
+                i_panels_:i_panels_+n_panels_, :] = small_mat
+
+            i += n
+            i_bpts += n_bpts
+            i_panels += n_panels
+
+        i_ += n_
+        i_bpts_ += n_bpts_
+        i_panels_ += n_panels_
+
+    mtx /= 4 * numpy.pi
+
+def _assemble_AIC_mtx_d(mtx, params, surfaces, skip=False):
+    """
+    Compute the aerodynamic influence coefficient matrix
+    for either solving the linear system or solving for the drag.
+
+    We use a nested for loop structure to loop through the lifting surfaces to
+    obtain the corresponding mesh, then for each mesh we again loop through
+    the lifting surfaces to obtain the collocation points used to compute
+    the horseshoe vortex influence coefficients.
+
+    This creates mtx with blocks corresponding to each lifting surface's
+    effects on other lifting surfaces. The block diagonal portions
+    correspond to each lifting surface's influencen on itself. For a single
+    lifting surface, this is the entire mtx.
+
+    Parameters
+    ----------
+    mtx[num_y-1, num_y-1, 3] : array_like
+        Aerodynamic influence coefficient (AIC) matrix, or the
+        derivative of v w.r.t. circulations.
+    params : dictionary
+        OpenMDAO params dictionary for a given aero problem
+    surfaces : dictionary
+        Dictionary containing all surfaces in an aero problem.
+    skip : boolean
+        If false, the bound vortex contributions on the collocation point
+        corresponding to the same panel are not included. Used for the drag
+        computation.
+
+    Returns
+    -------
+    mtx[tot_panels, tot_panels, 3] : array_like
+        Aerodynamic influence coefficient (AIC) matrix, or the
+        derivative of v w.r.t. circulations.
+    """
+
+    alpha = params['alpha']
+    mtx[:, :, :] = 0.0
+    cosa = numpy.cos(alpha * numpy.pi / 180.)
+    sina = numpy.sin(alpha * numpy.pi / 180.)
+    u = numpy.array([cosa, 0, sina])
+
+    i_ = 0
+    i_bpts_ = 0
+    i_panels_ = 0
+
+    # Loop over the lifting surfaces to compute their influence on the flow
+    # velocity at the collocation points
+    for surface_ in surfaces:
+
+        # Variable names with a trailing underscore correspond to the lifting
+        # surface being examined, not the collocation point
+        name_ = surface_['name']
+        nx_ = surface_['num_x']
+        ny_ = surface_['num_y']
+        n_ = nx_ * ny_
+        n_bpts_ = (nx_ - 1) * ny_
+        n_panels_ = (nx_ - 1) * (ny_ - 1)
+
+        # Obtain the lifting surface mesh in the form expected by the solver,
+        # with shape [nx_, ny_, 3]
+        mesh = params['def_mesh']
+        bpts = params['b_pts']
+
+        # Set counters to know where to index the sub-matrix within the full mtx
+        i = 0
+        i_bpts = 0
+        i_panels = 0
+
+        for surface in surfaces:
+            # These variables correspond to the collocation points
+            name = surface['name']
+            nx = surface['num_x']
+            ny = surface['num_y']
+            n = nx * ny
+            n_bpts = (nx - 1) * ny
+            n_panels = (nx - 1) * (ny - 1)
+            symmetry = surface['symmetry']
+
+            # Obtain the collocation points used to compute the AIC mtx.
+            # If setting up the AIC mtx, we use the collocation points (c_pts),
+            # but if setting up the matrix to solve for drag, we use the
+            # midpoints of the bound vortices.
+            if skip:
+                # Find the midpoints of the bound points, used in drag computations
+                pts = (params['b_pts'][:, 1:, :] + \
+                    params['b_pts'][:, :-1, :]) / 2
+            else:
+                pts = params['c_pts']
+
+            # Initialize sub-matrix to populate within full mtx
+            small_mat = numpy.zeros((n_panels, n_panels_, 3), dtype='complex')
+
+            # Dense fortran assembly for the AIC matrix
+            if fortran_flag:
+                small_mat[:, :, :] = OAS_API.oas_api.assembleaeromtx(alpha, pts, bpts,
+                                                         mesh, skip, symmetry)
 
             # Populate the full-size matrix with these surface-surface AICs
             mtx[i_panels:i_panels+n_panels,
@@ -283,7 +461,7 @@ class VLMGeometry(Component):
 
     """
 
-    def __init__(self, surface, prob_dict):
+    def __init__(self, surface):
         super(VLMGeometry, self).__init__()
 
         self.surface = surface
@@ -297,8 +475,7 @@ class VLMGeometry(Component):
 
         self.add_param('def_mesh', val=numpy.zeros((self.nx, self.ny, 3),
                        dtype="complex"))
-        self.add_param('alpha', val=prob_dict['alpha'])
-        self.add_output('b_pts', val=numpy.zeros((self.nx, self.ny, 3),
+        self.add_output('b_pts', val=numpy.zeros((self.nx-1, self.ny, 3),
                         dtype="complex"))
         self.add_output('c_pts', val=numpy.zeros((self.nx-1, self.ny-1, 3)))
         self.add_output('widths', val=numpy.zeros((self.nx-1, self.ny-1)))
@@ -310,21 +487,10 @@ class VLMGeometry(Component):
 
     def solve_nonlinear(self, params, unknowns, resids):
         name = self.surface['name']
-        mesh = params['def_mesh'].copy()
-
-        b_pts = unknowns['b_pts']
+        mesh = params['def_mesh']
 
         # Compute the bound points at 1/4 chord
-        b_pts[:-1, :, :] = mesh[:-1, :, :] * .75 + mesh[1:, :, :] * .25
-
-        # distance of the last row of points chordwise from the trailing edge
-        # last row of b_pts, defined with dist. This is also the starting vortex line
-        # dist_x = 0.3 * params['v'] * params['dt']
-        dist_x = 120.
-
-        for j in xrange(self.ny):
-            b_pts[-1, j, :] = mesh[-1, j, :]
-            b_pts[-1, j, 0] += dist_x
+        b_pts = mesh[:-1, :, :] * .75 + mesh[1:, :, :] * .25
 
         # Compute the collocation points at the midpoints of each
         # panel's 3/4 chord line
@@ -334,33 +500,7 @@ class VLMGeometry(Component):
                 0.5 * 0.75 * mesh[1:,  1:, :]
 
         # Compute the widths of each panel
-        widths = self._get_lengths(b_pts[:-1, 1:, :], b_pts[:-1, :-1, :], 2)
-
-        # Set rotations for b_pts and c_pts due to angle of attack alpha
-        alpha = params['alpha'] * numpy.pi / 180.
-        cosa = numpy.cos(-alpha)
-        sina = numpy.sin(-alpha)
-        rot_x = numpy.array([cosa, 0, -sina])
-        rot_z = numpy.array([sina, 0,  cosa])
-
-        b_pts_unrot = b_pts.copy()
-        c_pts_unrot = c_pts.copy()
-        mesh_unrot = mesh.copy()
-
-        for i in xrange(self.nx):
-            for j in xrange(self.ny):
-                b_pts[i, j, 0] = b_pts_unrot[i, j, :].dot(rot_x)
-                b_pts[i, j, 2] = b_pts_unrot[i, j, :].dot(rot_z)
-
-        for i in xrange(self.nx-1):
-        	for j in xrange(self.ny-1):
-        		c_pts[i, j, 0] = c_pts_unrot[i, j, :].dot(rot_x)
-        		c_pts[i, j, 2] = c_pts_unrot[i, j, :].dot(rot_z)
-
-        for i in xrange(self.nx):
-        	for j in xrange(self.ny):
-        		mesh[i, j, 0] = mesh[i, j, :].dot(rot_x)
-        		mesh[i, j, 2] = mesh[i, j, :].dot(rot_z)
+        widths = self._get_lengths(b_pts[:, 1:, :], b_pts[:, :-1, :], 2)
 
         # Compute the normal of each panel by taking the cross-product of
         # its diagonals. Note that this could be a nonplanar surface
@@ -456,7 +596,7 @@ class VLMCirculations(Component):
 
             self.add_param(name+'def_mesh', val=numpy.zeros((self.nx, self.ny, 3),
                            dtype="complex"))
-            self.add_param(name+'b_pts', val=numpy.zeros((self.nx, self.ny, 3),
+            self.add_param(name+'b_pts', val=numpy.zeros((self.nx-1, self.ny, 3),
                            dtype="complex"))
             self.add_param(name+'c_pts', val=numpy.zeros((self.nx-1, self.ny-1, 3),
                            dtype="complex"))
@@ -505,7 +645,7 @@ class VLMCirculations(Component):
 
         # Obtain the freestream velocity direction and magnitude by taking
         # alpha into account
-        alpha = 0.# params['alpha'] * numpy.pi / 180.
+        alpha = params['alpha'] * numpy.pi / 180.
         cosa = numpy.cos(alpha)
         sina = numpy.sin(alpha)
         v_inf = params['v'] * numpy.array([cosa, 0., sina], dtype="complex")
@@ -520,7 +660,6 @@ class VLMCirculations(Component):
         name = self.surface['name']
         self._assemble_system(params)
         unknowns['circulations'] = numpy.linalg.solve(self.mtx, self.rhs)
-        print unknowns['circulations']
 
     def apply_nonlinear(self, params, unknowns, resids):
         """ Compute the residuals of the linear system. """
@@ -609,9 +748,7 @@ class VLMForces(Component):
             self.nx = surface['num_x']
 
             self.add_param(name+'def_mesh', val=numpy.zeros((self.nx, self.ny, 3), dtype='complex'))
-            self.add_param(name+'b_pts', val=numpy.zeros((self.nx, self.ny, 3), dtype='complex'))
-            self.add_param(name+'normals', val=numpy.zeros((self.nx-1, self.ny-1, 3), dtype='complex'))
-            self.add_param(name+'widths', val=numpy.zeros((self.nx-1, self.ny-1, 3), dtype='complex'))
+            self.add_param(name+'b_pts', val=numpy.zeros((self.nx-1, self.ny, 3), dtype='complex'))
             self.add_output(name+'sec_forces', val=numpy.zeros((self.nx-1, self.ny-1, 3), dtype='complex'))
 
         self.tot_panels = tot_panels
@@ -629,7 +766,7 @@ class VLMForces(Component):
 
     def solve_nonlinear(self, params, unknowns, resids):
         circ = params['circulations']
-        alpha = 0.# params['alpha'] * numpy.pi / 180.
+        alpha = params['alpha'] * numpy.pi / 180.
         cosa = numpy.cos(alpha)
         sina = numpy.sin(alpha)
 
@@ -638,43 +775,36 @@ class VLMForces(Component):
         # bound vortex filament, not the collocation points from above
         _assemble_AIC_mtx(self.mtx, params, self.surfaces, skip=True)
 
-        print self.mtx
-        view_mat(self.mtx)
-
         # Compute the induced velocities at the midpoints of the
         # bound vortex filaments
         for ind in xrange(3):
             self.v[:, ind] = self.mtx[:, :, ind].dot(circ)
-        velo = numpy.array([cosa, 0., sina]) * params['v']
 
         # Add the freestream velocity to the induced velocity so that
         # self.v is the total velocity seen at the point
-        self.v += velo
+        self.v[:, 0] += cosa * params['v']
+        self.v[:, 2] += sina * params['v']
 
         i = 0
         for surface in self.surfaces:
             name = surface['name']
-            nx = surface['num_x']
-            ny = surface['num_y']
-
-            num_panels = (nx - 1) * (ny - 1)
+            num_panels = (surface['num_x'] - 1) * (surface['num_y'] - 1)
 
             b_pts = params[name+'b_pts']
 
-            bound = b_pts[:-1, 1:, :] - b_pts[:-1, :-1, :]
+            bound = b_pts[:, 1:, :] - b_pts[:, :-1, :]
 
             # Cross the obtained velocities with the bound vortex filament
             # vectors
             cross = numpy.cross(self.v[i:i+num_panels],
                                 bound.reshape(-1, bound.shape[-1], order='F'))
 
-            sec_forces = numpy.zeros(((nx-1)*(ny-1), 3), dtype='complex')
+            sec_forces = numpy.zeros(((surface['num_x']-1)*(surface['num_y']-1), 3), dtype='complex')
             # Compute the sectional forces acting on each panel
             for ind in xrange(3):
                 sec_forces[:, ind] = \
                     (params['rho'] * circ[i:i+num_panels] * cross[:, ind])
-            unknowns[name+'sec_forces'] = sec_forces.reshape((nx-1, ny-1, 3), order='C')
-            print unknowns[name+'sec_forces']
+            unknowns[name+'sec_forces'] = sec_forces.reshape((surface['num_x']-1, surface['num_y']-1, 3), order='F')
 
             i += num_panels
 
@@ -703,6 +833,9 @@ class VLMForces(Component):
             jac[name+'sec_forces', 'rho'] = sec_forces.flatten() / rho
 
         return jac
+
+    # def apply_linear(self, params, unknowns, dparams, dunknowns, dresids, mode):
+    #     print mode, dresids['sec_forces']
 
 
 class VLMLiftDrag(Component):
@@ -767,7 +900,7 @@ class VLMLiftDrag(Component):
 
     def solve_nonlinear(self, params, unknowns, resids):
         name = self.surface['name']
-        alpha = 0.# params['alpha'] * numpy.pi / 180.
+        alpha = params['alpha'] * numpy.pi / 180.
         forces = params['sec_forces'].reshape(-1, 3)
         cosa = numpy.cos(alpha)
         sina = numpy.sin(alpha)
@@ -809,7 +942,7 @@ class VLMLiftDrag(Component):
         name = self.surface['name']
 
         # Analytic derivatives for sec_forces
-        alpha = 0.# params['alpha'] * numpy.pi / 180.
+        alpha = params['alpha'] * numpy.pi / 180.
         cosa = numpy.cos(alpha)
         sina = numpy.sin(alpha)
 
