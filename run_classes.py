@@ -431,7 +431,7 @@ class OASProblem():
                      TransferDisplacements(surface),
                      promotes=['*'])
             tmp_group.add('vlmgeom',
-                     VLMGeometry(surface, prob_dict),
+                     VLMGeometry(surface),
                      promotes=['*'])
 
             # Add tmp_group to the problem as the name of the surface.
@@ -561,7 +561,7 @@ class OASProblem():
                      TransferDisplacements(surface),
                      promotes=['*'])
             tmp_group.add('aero_geom',
-                     VLMGeometry(surface, prob_dict),
+                     VLMGeometry(surface),
                      promotes=['*'])
             tmp_group.add('struct_states',
                      SpatialBeamStates(surface),

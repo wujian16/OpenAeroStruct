@@ -124,8 +124,11 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
             L = norm(P1 - P0)
             EA_L = E_vec[ielem] * A[ielem] / L
             GJ_L = G_vec[ielem] * J[ielem] / L
+            GJ_L = 1.e4 / L
             EIy_L3 = E_vec[ielem] * Iy[ielem] / L**3
+            EIy_L3 = 2.e4 / L**3
             EIz_L3 = E_vec[ielem] * Iz[ielem] / L**3
+            EIz_L3 = 4.e6 / L**3
 
             K_a[:, :] = EA_L * const_K
             K_t[:, :] = GJ_L * const_K
@@ -163,7 +166,9 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
             # Mass matrix #
             ###############
             mrhoAL = mrho * .00028274 * A[ielem] * L
+            mrhoAL = 0.75 * L
             mrhoJL = mrho * J[ielem] * L	# (J = Iy + Iz)
+            mrhoJL = 0.047 * L	# (J = Iy + Iz)
             M_a[:, :] = mrhoAL * const_M
             M_t[:, :] = mrhoJL * const_M
 
@@ -191,7 +196,7 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
             M[6*in1:6*in1+6, 6*in0:6*in0+6] += res[6:, :6]
             M[6*in0:6*in0+6, 6*in1:6*in1+6] += res[:6, 6:]
             M[6*in1:6*in1+6, 6*in1:6*in1+6] += res[6:, 6:]
-
+            
         # Include a scaled identity matrix in the rows and columns
         # corresponding to the structural constraints
         for ind in xrange(num_cons):
