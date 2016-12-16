@@ -23,7 +23,7 @@ from openmdao.devtools.partition_tree_n2 import view_tree
 from geometry import GeometryMesh, Bspline, gen_crm_mesh, gen_rect_mesh
 from transfer import TransferDisplacements, TransferLoads
 from vlm import VLMStates, VLMFunctionals, VLMGeometry
-from spatialbeam import SpatialBeamStates, SpatialBeamFunctionals, radii
+from spatialbeam import SpatialBeamStates, SpatialBeamFunctionals, radii, SpatialBeamFEM, SpatialBeamDisp
 from materials import MaterialsTube
 from functionals import FunctionalBreguetRange, FunctionalEquilibrium
 from gs_newton import HybridGSNewton
@@ -120,6 +120,8 @@ class OASProblem():
                     'M' : 0.84,             # Mach number at cruise
                     'rho' : 0.38,           # [kg/m^3] air density at 35,000 ft
                     'a' : 295.4,            # [m/s] speed of sound at 35,000 ft
+                    'num_dt' : 1,           # number of timesteps to use
+                    'final_t' : .1,         # [sec] amount of time to simulate
                     }
 
         return defaults
@@ -205,9 +207,10 @@ class OASProblem():
 
         # Set default loads at the tips
         loads = numpy.zeros((r.shape[0] + 1, 6), dtype='complex')
-        loads[0, 2] = 1e3
+        load = 1e3
+        loads[0, 2] = load
         if not surf_dict['symmetry']:
-            loads[-1, 2] = 1e3
+            loads[-1, 2] = load
         surf_dict['loads'] = loads
 
         # Throw a warning if the user provides two surfaces with the same name
@@ -360,9 +363,20 @@ class OASProblem():
             tmp_group.add('tube',
                      MaterialsTube(surface),
                      promotes=['*'])
+
+            dt = self.prob_dict['final_t'] / self.prob_dict['num_dt']
+            SBFEM = SpatialBeamFEM(surface, dt, self.prob_dict['num_dt'])
+
             tmp_group.add('struct_states',
-                     SpatialBeamStates(surface),
+                     SpatialBeamStates(surface, SBFEM, dt),
                      promotes=['*'])
+
+            # Loop over all timesteps desired and create groups
+            for t in xrange(self.prob_dict['num_dt']):
+                tmp_group.add('struct_step_'+str(t),
+                              SpatialBeamDisp(surface, SBFEM, t),
+                              promotes=['*'])
+
             tmp_group.add('struct_funcs',
                      SpatialBeamFunctionals(surface),
                      promotes=['*'])

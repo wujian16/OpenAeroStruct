@@ -20,7 +20,9 @@ from run_classes import OASProblem
 if __name__ == "__main__":
 
     # Set problem type
-    prob_dict = {'type' : 'struct'}
+    prob_dict = {'type' : 'struct',
+                 'num_dt' : 500,
+                 'final_t' : 1.}
 
     if sys.argv[1].startswith('0'):  # run analysis once
         prob_dict.update({'optimize' : False})
@@ -30,8 +32,8 @@ if __name__ == "__main__":
     # Instantiate problem and add default surface
     OAS_prob = OASProblem(prob_dict)
     OAS_prob.add_surface({'name' : 'wing',
-                          'num_y' : 41,
-                          'symmetry' : True})
+                          'num_y' : 201,
+                          'symmetry' : False})
 
     # Single lifting surface
     if not sys.argv[1].endswith('m'):

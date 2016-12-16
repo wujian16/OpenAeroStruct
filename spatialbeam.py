@@ -9,6 +9,7 @@ from __future__ import division
 import numpy
 numpy.random.seed(123)
 
+from pyNBSolver import pyNBSolver
 from openmdao.api import Component, Group
 from scipy.linalg import lu_factor, lu_solve
 import matplotlib.pyplot as plt
@@ -250,7 +251,7 @@ class SpatialBeamFEM(Component):
 
     """
 
-    def __init__(self, surface, cg_x=5):
+    def __init__(self, surface, dt, num_dt, cg_x=5):
         super(SpatialBeamFEM, self).__init__()
 
         self.surface = surface
@@ -352,14 +353,14 @@ class SpatialBeamFEM(Component):
 
         self.rhs = numpy.zeros(size, dtype='complex')
 
-	def createNBSolver(self, params, unknowns):
-		self.NBSolver = pyNBSolver(M = self.reduced_M,        # Mass matrix
-                                   C = self.reduced_C,        # Damping matrix
+        self.dt = dt
+        self.num_dt = num_dt
+
+    def createNBSolver(self, params, unknowns):
+    	self.NBSolver = pyNBSolver(M = self.reduced_M,        # Mass matrix
                                    K = self.reduced_K,        # Stiffness matrix
                                    N = self.num_dt+1,         # Number of timesteps you want to run
-                                   dt = unknowns['dt'])       # Timestep
-                                   #sl = 'cpld')              # Tells the solver that you use
-                                   #ft = "csv")               # Format for writing out displacements
+                                   dt = self.dt)       # Timestep
 
     def solve_nonlinear(self, params, unknowns, resids):
         mrho = self.surface['mrho']
@@ -408,9 +409,7 @@ class SpatialBeamFEM(Component):
         unknowns['modes'] = evectors_ord
         unknowns['freqs'] = freqs_ordered
 
-        # unknowns['dt'] = 1.#self.final_t / self.num_dt
-
-        # self.createNBSolver(params, unknowns)
+        self.createNBSolver(params, unknowns)
 
     def apply_nonlinear(self, params, unknowns, resids):
         mrho = self.surface['mrho']
@@ -818,18 +817,69 @@ class SpatialBeamFailureKS(Component):
         ks = 1 / rho * nlog(nsum(nexp(rho * (vonmises/sigma - 1 - fmax))))
         unknowns['failure'] = fmax + ks
 
+class SpatialBeamDisp(Component):
+    """
+    Compute the transient displacement of the spatial beam.
+
+    """
+
+    def __init__(self, surface, SBFEM, t):
+        super(SpatialBeamDisp, self).__init__()
+        self.ny = surface['num_y']
+        self.nx = surface['num_x']
+        self.n = self.nx * self.ny
+        self.mesh = surface['mesh']
+        self.fem_origin = surface['fem_origin']
+        self.t = t
+        self.cg_x = 5.
+        self.SBFEM = SBFEM
+
+        self.add_param('loads', val=numpy.zeros((self.ny, 6)))
+        self.add_param('nodes', val=numpy.zeros((self.ny, 3)))
+        if t>0:
+            self.add_param('disp_'+str(t-1), val=numpy.zeros((self.ny, 6)))
+        self.add_output('disp_'+str(t), val=numpy.zeros((self.ny, 6)))
+
+        self.deriv_options['type'] = 'cs'
+        self.deriv_options['form'] = 'central'
+
+    def solve_nonlinear(self, params, unknowns, resids):
+        rhs = params['loads'].reshape((6*self.ny))
+
+        # Find constrained nodes based on closeness to specified cg point
+        nodes = params['nodes']
+        dist = nodes - numpy.array([self.cg_x, 0, 0])
+        idx = (numpy.linalg.norm(dist, axis=1)).argmin()
+        cons = idx
+
+        del_list = []
+        for k in xrange(6):
+            del_list.append(6*cons+k)
+        rhs = numpy.delete(rhs, del_list, axis=0)
+
+        self.SBFEM.NBSolver.stepCounter()
+        self.SBFEM.NBSolver.setForces(rhs)
+        self.SBFEM.NBSolver.timeStepping()
+        disp = self.SBFEM.NBSolver.getCurDispl().reshape(-1, 6)
+
+        # Dumb way to fully populate the disp unknown
+        j = 0
+        for i in range(self.ny):
+            if i != cons:
+                unknowns['disp_'+str(self.t)][i, :] = disp[j, :]
+                j += 1
 
 class SpatialBeamStates(Group):
     """ Group that contains the spatial beam states. """
 
-    def __init__(self, surface):
+    def __init__(self, surface, SBFEM, dt):
         super(SpatialBeamStates, self).__init__()
 
         self.add('nodes',
                  ComputeNodes(surface),
                  promotes=['*'])
         self.add('fem',
-                 SpatialBeamFEM(surface),
+                 SBFEM,
                  promotes=['*'])
 
 
