@@ -207,7 +207,10 @@ class OASProblem():
 
         # Set default loads at the tips
         loads = numpy.zeros((r.shape[0] + 1, 6), dtype='complex')
-        load = 1e3
+        if surf_dict['wing_type'] == 'CRM':
+            load = 1e6
+        else:
+            load = 1e3
         loads[0, 2] = load
         if not surf_dict['symmetry']:
             loads[-1, 2] = load
@@ -331,8 +334,13 @@ class OASProblem():
             name = surface['name']
             tmp_group = Group()
 
-            surface['r'] = surface['r'] / 5
-            surface['t'] = surface['r'] / 20
+            # Hardcoded for 510 project
+            if surface['wing_type'] == 'CRM':
+                surface['t'] = surface['r'] / 200
+            else:
+                surface['r'] = surface['r'] / 3
+                surface['t'] = surface['r'] / 120
+
 
             # Add independent variables that do not belong to a specific component.
             # Note that these are the only ones necessary for structual-only

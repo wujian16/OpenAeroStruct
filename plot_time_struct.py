@@ -63,11 +63,11 @@ class Display(object):
         toolbar = NavigationToolbar2TkAgg(self.canvas, self.root)
         toolbar.update()
         self.canvas._tkcanvas.pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
-        self.ax = plt.subplot2grid((1, 1), (0, 0), rowspan=1, colspan=1)
+        self.ax = plt.subplot2grid((1, 1), (0, 0), rowspan=1, colspan=1, projection='3d')
 
         self.num_iters = 0
         self.db_name = db_name
-        self.show_wing = False
+        self.show_wing = True
         self.show_tube = True
         self.curr_pos = 0
         self.old_n = 0
@@ -81,6 +81,7 @@ class Display(object):
         self.db = sqlitedict.SqliteDict(self.db_name, 'openmdao')
 
         self.disp = []
+        self.vonmises = []
         self.mesh = []
         self.r = []
         self.t = []
@@ -125,6 +126,7 @@ class Display(object):
                     self.t.append(case_data['Unknowns'][name+'.thickness'])
                     for t in range(max_t):
                         self.disp.append(case_data['Unknowns']['wing.disp_'+str(t)])
+                        self.vonmises.append(case_data['Unknowns']['wing.vonmises_'+str(t)])
                     # pick off only the first four modes
                     self.modes.append(case_data['Unknowns'][name+'.modes'][:, :4])
                     self.freqs.append(case_data['Unknowns'][name+'.freqs'])
@@ -140,42 +142,139 @@ class Display(object):
         else:
             self.symmetry = False
 
+        # recenter mesh points for better viewing
+        center = numpy.zeros((3))
+        for j in range(n_names):
+            center += numpy.mean(self.mesh[0], axis=(0,1))
+        for j in range(n_names):
+            self.mesh[0] -= center / n_names
+
         self.min_disp, self.max_disp = self.get_list_limits(self.disp)
         diff = (self.max_disp - self.min_disp) * 0.05
         self.min_disp -= diff
         self.max_disp += diff
 
+        self.min_vm, self.max_vm = self.get_list_limits(self.vonmises)
+        diff = (self.max_vm - self.min_vm) * 0.05
+        self.min_vm -= diff
+        self.max_vm += diff
+
 
     def plot_sides(self):
-        for j, name in enumerate(self.names):
-            m_vals = self.mesh[0].copy()
-            span = m_vals[0, -1, 1] - m_vals[0, 0, 1]
-            if self.symmetry:
-                rel_span = (m_vals[0, :, 1] - m_vals[0, 0, 1]) / span - 1
-                rel_span = numpy.hstack((rel_span[:-1], -rel_span[::-1]))
-                span_diff = ((m_vals[0, :-1, 1] + m_vals[0, 1:, 1]) / 2 - m_vals[0, 0, 1]) / span - 1
-                span_diff = numpy.hstack((span_diff, -span_diff[::-1]))
-            else:
-                rel_span = (m_vals[0, :, 1] - m_vals[0, 0, 1]) * 2 / span - 1
-                span_diff = ((m_vals[0, :-1, 1] + m_vals[0, 1:, 1]) / 2 - m_vals[0, 0, 1]) * 2 / span - 1
-
-            if self.show_tube:
-                self.ax.set_ylim([self.min_disp, self.max_disp])
-                disp = self.disp[self.curr_pos]
-                half = int(len(rel_span) / 2)
-                if self.symmetry:
-                    rel_span = rel_span[half:]
-                self.ax.plot(rel_span, disp[:, 2])
-                self.ax.set_xlabel('Normalized span')
-                self.ax.set_ylabel('Displacement (m)')
-
+        pass
 
     def plot_wing(self):
         n_names = len(self.names)
         self.ax.cla()
+        az = self.ax.azim
+        el = self.ax.elev
+        dist = self.ax.dist
 
         for j, name in enumerate(self.names):
-            mesh0 = self.mesh[0]
+            mesh0 = self.mesh[0].copy()
+
+            # Change this to coarsen the mesh
+            skip = 1
+            mesh0 = mesh0[:, ::skip, :]
+            disp = self.disp[self.curr_pos][::skip]
+
+            w = 0.35
+            ref_curve = (1-w) * mesh0[0, :, :] + w * mesh0[-1, :, :]
+            Smesh = numpy.zeros(mesh0.shape)
+            for ind in xrange(mesh0.shape[0]):
+                Smesh[ind, :, :] = mesh0[ind, :, :] - ref_curve
+
+            def_mesh = numpy.zeros(mesh0.shape)
+            cos, sin = numpy.cos, numpy.sin
+            for ind in xrange(mesh0.shape[1]):
+                dx, dy, dz, rx, ry, rz = disp[ind, :]
+
+                # 1 eye from the axis rotation matrices
+                # -3 eye from subtracting Smesh three times
+                T = -2 * numpy.eye(3)
+                T[ 1:,  1:] += [[cos(rx), -sin(rx)], [ sin(rx), cos(rx)]]
+                T[::2, ::2] += [[cos(ry),  sin(ry)], [-sin(ry), cos(ry)]]
+                T[ :2,  :2] += [[cos(rz), -sin(rz)], [ sin(rz), cos(rz)]]
+
+                def_mesh[:, ind, :] += Smesh[:, ind, :].dot(T)
+                def_mesh[:, ind, 0] += dx
+                def_mesh[:, ind, 1] += dy
+                def_mesh[:, ind, 2] += dz
+
+            mesh0 += def_mesh
+
+            self.ax.set_axis_off()
+
+            if self.show_wing:
+                x = mesh0[:, :, 0]
+                y = mesh0[:, :, 1]
+                z = mesh0[:, :, 2]
+
+                self.ax.plot_wireframe(x, y, z, rstride=1, cstride=1, color='k')
+
+            if self.show_tube:
+                r0 = self.r[0][::skip]
+                t0 = self.t[0][::skip]
+                colors = self.vonmises[self.curr_pos][::skip]
+                colors = colors / self.max_vm
+                num_circ = 12
+                fem_origin = 0.35
+                n = mesh0.shape[1]
+                p = numpy.linspace(0, 2*numpy.pi, num_circ)
+
+                chords = mesh0[-1, :, 0] - mesh0[0, :, 0]
+                comp = fem_origin * chords + mesh0[0, :, 0]
+                num_nodes = mesh0.shape[1]
+                for i in xrange(num_nodes-1):
+                    r = numpy.array((r0[i], r0[i]))
+                    R, P = numpy.meshgrid(r, p)
+                    X, Z = R*numpy.cos(P), R*numpy.sin(P)
+                    X[:, 0] += comp[i]
+                    X[:, 1] += comp[i+1]
+                    Z[:, 0] += fem_origin * (mesh0[-1, i, 2] - mesh0[0, i, 2]) + mesh0[0, i, 2]
+                    Z[:, 1] += fem_origin * (mesh0[-1, i+1, 2] - mesh0[0, i+1, 2]) + mesh0[0, i+1, 2]
+                    Y = numpy.empty(X.shape)
+                    Y[:] = numpy.linspace(mesh0[0, i, 1], mesh0[0, i+1, 1], 2)
+                    col = numpy.zeros(X.shape)
+                    col[:] = colors[i]
+                    try:
+                        self.ax.plot_surface(X, Y, Z, rstride=1, cstride=1,
+                            facecolors=cm.viridis(col), linewidth=0)
+                    except:
+                        self.ax.plot_surface(X, Y, Z, rstride=1, cstride=1,
+                            facecolors=cm.coolwarm(col), linewidth=0)
+
+        lim = 0.
+        for j in range(n_names):
+            ma = numpy.max(self.mesh[0], axis=(0,1,2))
+            if ma > lim:
+                lim = ma
+        lim /= float(zoom_scale)
+        self.ax.auto_scale_xyz([-lim, lim], [-lim, lim], [-lim, lim])
+        self.ax.set_title("Timestep {0:0.3f}".format(self.curr_pos / 500 * 1.))
+
+        #
+        # for j, name in enumerate(self.names):
+        #     m_vals = self.mesh[0].copy()
+        #     span = m_vals[0, -1, 1] - m_vals[0, 0, 1]
+        #     if self.symmetry:
+        #         rel_span = (m_vals[0, :, 1] - m_vals[0, 0, 1]) / span - 1
+        #         rel_span = numpy.hstack((rel_span[:-1], -rel_span[::-1]))
+        #         span_diff = ((m_vals[0, :-1, 1] + m_vals[0, 1:, 1]) / 2 - m_vals[0, 0, 1]) / span - 1
+        #         span_diff = numpy.hstack((span_diff, -span_diff[::-1]))
+        #     else:
+        #         rel_span = (m_vals[0, :, 1] - m_vals[0, 0, 1]) * 2 / span - 1
+        #         span_diff = ((m_vals[0, :-1, 1] + m_vals[0, 1:, 1]) / 2 - m_vals[0, 0, 1]) * 2 / span - 1
+        #
+        #     if self.show_tube:
+        #         self.ax.set_ylim([self.min_disp, self.max_disp])
+        #         disp = self.disp[self.curr_pos]
+        #         half = int(len(rel_span) / 2)
+        #         if self.symmetry:
+        #             rel_span = rel_span[half:]
+        #         self.ax.plot(rel_span, disp[:, 2])
+        #         self.ax.set_xlabel('Normalized span')
+        #         self.ax.set_ylabel('Displacement (m)')
 
     def save_video(self):
         FFMpegWriter = manimation.writers['ffmpeg']

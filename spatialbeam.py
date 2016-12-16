@@ -667,7 +667,6 @@ class SpatialBeamVonMisesTube(Component):
 
         self.T = numpy.zeros((3, 3), dtype='complex')
         self.x_gl = numpy.array([1, 0, 0], dtype='complex')
-        self.t = 0
 
     def solve_nonlinear(self, params, unknowns, resids):
         elem_IDs = self.elem_IDs
@@ -836,12 +835,28 @@ class SpatialBeamDisp(Component):
 
         self.add_param('loads', val=numpy.zeros((self.ny, 6)))
         self.add_param('nodes', val=numpy.zeros((self.ny, 3)))
+        self.add_param('r', val=numpy.zeros((self.ny-1)))
+
         if t>0:
             self.add_param('disp_'+str(t-1), val=numpy.zeros((self.ny, 6)))
         self.add_output('disp_'+str(t), val=numpy.zeros((self.ny, 6)))
+        self.add_output('vonmises_'+str(self.t), val=numpy.zeros((self.ny-1, 2),
+                        dtype="complex"))
 
         self.deriv_options['type'] = 'cs'
         self.deriv_options['form'] = 'central'
+
+        elem_IDs = numpy.zeros((self.ny - 1, 2), int)
+        arange = numpy.arange(self.ny-1)
+        elem_IDs[:, 0] = arange
+        elem_IDs[:, 1] = arange + 1
+
+        self.elem_IDs = elem_IDs
+        self.E = surface['E']
+        self.G = surface['G']
+
+        self.T = numpy.zeros((3, 3), dtype='complex')
+        self.x_gl = numpy.array([1, 0, 0], dtype='complex')
 
     def solve_nonlinear(self, params, unknowns, resids):
         rhs = params['loads'].reshape((6*self.ny))
@@ -868,6 +883,46 @@ class SpatialBeamDisp(Component):
             if i != cons:
                 unknowns['disp_'+str(self.t)][i, :] = disp[j, :]
                 j += 1
+
+
+        elem_IDs = self.elem_IDs
+        r = params['r']
+        disp = unknowns['disp_'+str(self.t)].copy()
+        nodes = params['nodes']
+        vonmises = unknowns['vonmises_'+str(self.t)]
+        T = self.T
+        E = self.E
+        G = self.G
+        x_gl = self.x_gl
+
+        num_elems = elem_IDs.shape[0]
+        for ielem in xrange(num_elems):
+            in0, in1 = elem_IDs[ielem, :]
+
+            P0 = nodes[in0, :]
+            P1 = nodes[in1, :]
+            L = norm(P1 - P0)
+
+            x_loc = unit(P1 - P0)
+            y_loc = unit(numpy.cross(x_loc, x_gl))
+            z_loc = unit(numpy.cross(x_loc, y_loc))
+
+            T[0, :] = x_loc
+            T[1, :] = y_loc
+            T[2, :] = z_loc
+
+            u0x, u0y, u0z = T.dot(disp[in0, :3])
+            r0x, r0y, r0z = T.dot(disp[in0, 3:])
+            u1x, u1y, u1z = T.dot(disp[in1, :3])
+            r1x, r1y, r1z = T.dot(disp[in1, 3:])
+
+            tmp = numpy.sqrt((r1y - r0y)**2 + (r1z - r0z)**2)
+            sxx0 = E * (u1x - u0x) / L + E * r[ielem] / L * tmp
+            sxx1 = E * (u0x - u1x) / L + E * r[ielem] / L * tmp
+            sxt = G * r[ielem] * (r1x - r0x) / L
+
+            vonmises[ielem, 0] = numpy.sqrt(sxx0**2 + sxt**2)
+            vonmises[ielem, 1] = numpy.sqrt(sxx1**2 + sxt**2)
 
 class SpatialBeamStates(Group):
     """ Group that contains the spatial beam states. """
