@@ -66,17 +66,19 @@ class Display(object):
         self.root = Tk.Tk()
         self.root.wm_title("Viewer")
 
+        # Initialize figure objects
         self.f = plt.figure(dpi=100, figsize=(12, 6), facecolor='white')
         self.canvas = FigureCanvasTkAgg(self.f, master=self.root)
         self.canvas.get_tk_widget().pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
 
+        # Create frame to store options buttons and objects
         self.options_frame = Tk.Frame(self.root)
         self.options_frame.pack()
 
         toolbar = NavigationToolbar2TkAgg(self.canvas, self.root)
         toolbar.update()
         self.canvas._tkcanvas.pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
-        self.ax = plt.subplot2grid((4, 8), (0, 0), rowspan=4,
+        self.ax = plt.subplot2grid((30, 8), (0, 0), rowspan=30,
                                    colspan=4, projection='3d')
 
         self.num_iters = 0
@@ -89,16 +91,18 @@ class Display(object):
         self.load_db()
 
         if self.show_wing and not self.show_tube:
-            self.ax2 = plt.subplot2grid((4, 8), (0, 4), rowspan=2, colspan=4)
-            self.ax3 = plt.subplot2grid((4, 8), (2, 4), rowspan=2, colspan=4)
+            self.ax2 = plt.subplot2grid((30, 8), (0, 4), rowspan=15, colspan=4)
+            self.ax3 = plt.subplot2grid((30, 8), (15, 4), rowspan=15, colspan=4)
         if self.show_tube and not self.show_wing:
-            self.ax4 = plt.subplot2grid((4, 8), (0, 4), rowspan=2, colspan=4)
-            self.ax5 = plt.subplot2grid((4, 8), (2, 4), rowspan=2, colspan=4)
+            self.ax4 = plt.subplot2grid((30, 8), (0, 4), rowspan=10, colspan=4)
+            self.ax5 = plt.subplot2grid((30, 8), (10, 4), rowspan=10, colspan=4)
+            self.ax6 = plt.subplot2grid((30, 8), (20, 4), rowspan=10, colspan=4)
         if self.show_wing and self.show_tube:
-            self.ax2 = plt.subplot2grid((4, 8), (0, 4), colspan=4)
-            self.ax3 = plt.subplot2grid((4, 8), (1, 4), colspan=4)
-            self.ax4 = plt.subplot2grid((4, 8), (2, 4), colspan=4)
-            self.ax5 = plt.subplot2grid((4, 8), (3, 4), colspan=4)
+            self.ax2 = plt.subplot2grid((30, 8), (0, 4), rowspan=6, colspan=4)
+            self.ax3 = plt.subplot2grid((30, 8), (6, 4), rowspan=6, colspan=4)
+            self.ax4 = plt.subplot2grid((30, 8), (12, 4), rowspan=6, colspan=4)
+            self.ax5 = plt.subplot2grid((30, 8), (18, 4), rowspan=6, colspan=4)
+            self.ax6 = plt.subplot2grid((30, 8), (24, 4), rowspan=6, colspan=4)
 
     def load_db(self):
         # Change for future versions of OpenMDAO, still in progress
@@ -124,6 +128,8 @@ class Display(object):
         self.AR = []
         self.S_ref = []
         self.obj = []
+        self.modes = []
+        self.freqs = []
 
         # Change for future versions of OpenMDAO
         # for tag in self.db_metadata:
@@ -173,6 +179,9 @@ class Display(object):
                         self.t.append(case_data['Unknowns'][name+'.thickness'])
                         self.vonmises.append(
                             numpy.max(case_data['Unknowns'][name+'.vonmises'], axis=1))
+                        # pick off only the first four modes
+                        self.modes.append(case_data['Unknowns'][name+'.modes'][:, :4])
+                        self.freqs.append(case_data['Unknowns'][name+'.freqs'])
                         self.show_tube = True
                     except:
                         self.show_tube = False
@@ -199,6 +208,9 @@ class Display(object):
                     normals.append(case_data['Unknowns'][name+'.normals'])
                     widths.append(case_data['Unknowns'][name+'.widths'])
                     sec_forces.append(case_data['Unknowns']['coupled.aero_states.' + short_name + '_sec_forces'])
+                    # pick off only the first six modes
+                    self.modes.append(case_data['Unknowns']['coupled.' + short_name + '.modes'][:, :6])
+                    self.freqs.append(case_data['Unknowns']['coupled.' + short_name + '.freqs'])
                     self.CL.append(case_data['Unknowns'][short_name+'_perf.CL1'])
                     self.S_ref.append(case_data['Unknowns'][name+'.S_ref'])
 
@@ -294,10 +306,16 @@ class Display(object):
             diff = (self.max_t - self.min_t) * 0.05
             self.min_t -= diff
             self.max_t += diff
+
             self.min_vm, self.max_vm = self.get_list_limits(self.vonmises)
             diff = (self.max_vm - self.min_vm) * 0.05
             self.min_vm -= diff
             self.max_vm += diff
+
+            self.min_modes, self.max_modes = self.get_list_limits(self.modes)
+            diff = (self.max_modes - self.min_modes) * 0.05
+            self.min_modes -= diff
+            self.max_modes += diff
 
     def plot_sides(self):
 
@@ -339,6 +357,13 @@ class Display(object):
             self.ax5.text(0.05, 0.85, 'failure limit',
                 transform=self.ax5.transAxes, color='r')
 
+            self.ax6.cla()
+            self.ax6.locator_params(axis='y',nbins=4)
+            self.ax6.locator_params(axis='x',nbins=3)
+            self.ax6.set_ylim([self.min_modes, self.max_modes])
+            self.ax6.set_xlim([-1, 1])
+            self.ax6.set_ylabel('mode shapes', rotation="horizontal", ha="right")
+
         for j, name in enumerate(self.names):
             m_vals = self.mesh[self.curr_pos+j].copy()
             span = m_vals[0, -1, 1] - m_vals[0, 0, 1]
@@ -373,6 +398,25 @@ class Display(object):
 
                 self.ax4.plot(span_diff, thick_vals, lw=2, c='b')
                 self.ax5.plot(span_diff, vm_vals, lw=2, c='b')
+
+                # Pick off only the first dof mode
+                dof = 0
+                modes = self.modes[self.curr_pos+j]
+                modes = modes[dof::6, :]
+
+                color_cycle = ['b', 'g', 'r', 'k', 'c'] * 10
+
+                # Loop over each mode to plot
+                for i in range(modes.shape[1]):
+                    half = int(modes.shape[0] / 2)
+
+                    # Mirror the modes if it is symmetric
+                    if self.symmetry:
+                        modes_ = numpy.hstack((modes[:, i], numpy.array([0.]), modes[:, i][::-1]))
+                        self.ax6.plot(rel_span, modes_, lw=2, c=color_cycle[i])
+                    else:
+                        modes_ = numpy.hstack((modes[:half, i], numpy.array([0.]), modes[half:, i]))
+                        self.ax6.plot(rel_span, modes_, lw=2, c=color_cycle[i])
 
     def plot_wing(self):
 
@@ -458,6 +502,10 @@ class Display(object):
         round_to_n = lambda x, n: round(x, -int(numpy.floor(numpy.log10(abs(x)))) + (n - 1))
         obj_val = round_to_n(self.obj[self.curr_pos], 7)
         self.ax.text2D(.55, .05, self.obj_key + ': {}'.format(obj_val),
+            transform=self.ax.transAxes, color='k')
+
+        freq_val = round_to_n(numpy.min(self.freqs[self.curr_pos]), 7)
+        self.ax.text2D(.55, .0, 'lowest freq: {}'.format(freq_val),
             transform=self.ax.transAxes, color='k')
 
         self.ax.view_init(elev=el, azim=az)  # Reproduce view

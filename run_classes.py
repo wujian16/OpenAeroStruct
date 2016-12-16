@@ -367,8 +367,6 @@ class OASProblem():
                      SpatialBeamFunctionals(surface),
                      promotes=['*'])
 
-            tmp_group.struct_states.ln_solver = ScipyGMRES()
-
             # Add tmp_group to the problem with the name of the surface.
             # The default is 'wing'.
             nm = name
@@ -566,9 +564,7 @@ class OASProblem():
             tmp_group.add('struct_states',
                      SpatialBeamStates(surface),
                      promotes=['*'])
-            # tmp_group.struct_states.ln_solver = LinearGaussSeidel()
-            tmp_group.struct_states.ln_solver = ScipyGMRES()
-
+            tmp_group.struct_states.ln_solver = LinearGaussSeidel()
 
             name = name_orig
             exec(name + ' = tmp_group')

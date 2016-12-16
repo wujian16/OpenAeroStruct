@@ -13,6 +13,7 @@ from __future__ import division
 import sys
 from time import time
 import numpy
+from spatialbeam import plot_eigs
 
 from run_classes import OASProblem
 
@@ -29,7 +30,8 @@ if __name__ == "__main__":
     # Instantiate problem and add default surface
     OAS_prob = OASProblem(prob_dict)
     OAS_prob.add_surface({'name' : 'wing',
-                          'num_y' : 5})
+                          'num_y' : 41,
+                          'symmetry' : True})
 
     # Single lifting surface
     if not sys.argv[1].endswith('m'):
@@ -64,3 +66,4 @@ if __name__ == "__main__":
     OAS_prob.run()
 
     print "\nWing weight:", OAS_prob.prob['wing.weight']
+    plot_eigs(OAS_prob.prob['wing.modes'])

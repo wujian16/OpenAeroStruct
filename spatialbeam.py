@@ -56,14 +56,14 @@ def order_and_normalize(evalues, evectors, M):
 def Eig_matrix(M, K):
     return numpy.linalg.inv(M).dot(K)
 
-def plot_eigs(evals, evecs, dof=0, num_modes=5):
+def plot_eigs(evecs, dof=0, num_modes=5):
     fig = plt.figure()
-    lins = numpy.linspace(0, 1, len(evecs[:, 0])/6)
+    lins = numpy.linspace(0, 1, len(evecs[:, 0])/6+1)
     for mode in range(num_modes):
-        plt.plot(lins, evecs[dof::6, mode][::-1], label='Mode {}'.format(mode))
+        full_vec = numpy.hstack((numpy.array([0]), evecs[dof::6, mode][::-1]))
+        plt.plot(lins, full_vec, label='Mode {}'.format(mode))
     plt.legend(loc=0)
     plt.show()
-
 
 def _assemble_system(nodes, A, J, Iy, Iz, loads,
                      K_a, K_t, K_y, K_z,
@@ -95,7 +95,6 @@ def _assemble_system(nodes, A, J, Iy, Iz, loads,
 
     # Dense Fortran
     if fortran_flag:
-        print 'fortran'
         K, M, x = OAS_API.oas_api.assemblestructmtx(nodes, A, J, Iy, Iz,
                                      K_a, K_t, K_y, K_z,
                                      M_a, M_t, M_y, M_z,
@@ -404,7 +403,7 @@ class SpatialBeamFEM(Component):
         frequencies = numpy.sqrt(evalues)
         freqs_ordered = numpy.sort(frequencies)
 
-        plot_eigs(evalues_ord, evectors_ord)
+        # plot_eigs(evalues_ord, evectors_ord)
 
         unknowns['modes'] = evectors_ord
         unknowns['freqs'] = freqs_ordered
@@ -442,7 +441,24 @@ class SpatialBeamFEM(Component):
         jac.update(fd_jac)
         jac['disp', 'disp'] = self.K.real
 
+        self.lup = lu_factor(self.K.real)
+
         return jac
+
+    def solve_linear(self, dumat, drmat, vois, mode=None):
+
+        if mode == 'fwd':
+            sol_vec, rhs_vec = self.dumat, self.drmat
+            t = 0
+        else:
+            sol_vec, rhs_vec = self.drmat, self.dumat
+            t = 1
+
+        for voi in vois:
+
+            size = self.lup[0].shape[0]
+            sol_vec[voi].vec[:size] = \
+                lu_solve(self.lup, rhs_vec[voi].vec[:size], trans=t)
 
 class ComputeNodes(Component):
     """
