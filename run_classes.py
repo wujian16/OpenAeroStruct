@@ -205,16 +205,38 @@ class OASProblem():
         surf_dict['r'] = r
         surf_dict['t'] = r / 10
 
-        # Set default loads at the tips
         loads = numpy.zeros((r.shape[0] + 1, 6), dtype='complex')
-        if surf_dict['wing_type'] == 'CRM':
-            load = 1e6
+        if surf_dict['prop_loads']:
+            load = 1e4
+            # Compute the normal of each panel by taking the cross-product of
+            # its diagonals. Note that this could be a nonplanar surface
+            normals = numpy.cross(
+                mesh[:-1,  1:, :] - mesh[1:, :-1, :],
+                mesh[:-1, :-1, :] - mesh[1:,  1:, :],
+                axis=2)
+
+            norms = numpy.sqrt(numpy.sum(normals**2, axis=2))
+
+            for j in xrange(3):
+                normals[:, :, j] /= norms
+
+            areas = numpy.zeros((1, norms.shape[1]+1), dtype='complex')
+            areas[:, :-1] += norms
+            areas[:, 1:] += norms
+
+            loads[:, 2] = load * areas
+            surf_dict['loads'] = loads
+
         else:
-            load = 1e3
-        loads[0, 2] = load
-        if not surf_dict['symmetry']:
-            loads[-1, 2] = load
-        surf_dict['loads'] = loads
+            # Set default loads at the tips
+            if surf_dict['wing_type'] == 'CRM':
+                load = 1e5
+            else:
+                load = 1e3
+            loads[0, 2] = load
+            if not surf_dict['symmetry']:
+                loads[-1, 2] = load
+            surf_dict['loads'] = loads
 
         # Throw a warning if the user provides two surfaces with the same name
         name = surf_dict['name']
@@ -379,11 +401,12 @@ class OASProblem():
                      SpatialBeamStates(surface, SBFEM, dt),
                      promotes=['*'])
 
-            # Loop over all timesteps desired and create groups
-            for t in xrange(self.prob_dict['num_dt']):
-                tmp_group.add('struct_step_'+str(t),
-                              SpatialBeamDisp(surface, SBFEM, t),
-                              promotes=['*'])
+            if self.prob_dict['num_dt'] > 1:
+                # Loop over all timesteps desired and create groups
+                for t in xrange(self.prob_dict['num_dt']):
+                    tmp_group.add('struct_step_'+str(t),
+                                  SpatialBeamDisp(surface, SBFEM, t),
+                                  promotes=['*'])
 
             tmp_group.add('struct_funcs',
                      SpatialBeamFunctionals(surface),

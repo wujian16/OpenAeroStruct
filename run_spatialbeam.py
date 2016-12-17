@@ -19,10 +19,12 @@ from run_classes import OASProblem
 
 if __name__ == "__main__":
 
+    sym = False
+
     # Set problem type
     prob_dict = {'type' : 'struct',
-                 'num_dt' : 502,
-                 'final_t' : 1.}
+                 'num_dt' : 602,
+                 'final_t' : 2.}
 
     if sys.argv[1].startswith('0'):  # run analysis once
         prob_dict.update({'optimize' : False})
@@ -40,14 +42,15 @@ if __name__ == "__main__":
                           'wing_type' : 'CRM',
                           'num_y' : 21,
                           'num_x' : 2,
-                          'symmetry' : False})
+                          'symmetry' : sym,
+                          'prop_loads' : True})
 
     # Single lifting surface
     if not sys.argv[1].endswith('m'):
 
         # Setup problem and add design variables, constraint, and objective
         OAS_prob.setup()
-        OAS_prob.add_desvar('wing.thickness_cp', lower=0.01, upper=0.25, scaler=1e2)
+        OAS_prob.add_desvar('wing.thickness_cp', lower=0.01, upper=0.75, scaler=1e2)
         OAS_prob.add_constraint('wing.failure', upper=0.)
         OAS_prob.add_objective('wing.weight', scaler=1e-3)
 
@@ -75,4 +78,4 @@ if __name__ == "__main__":
     OAS_prob.run()
 
     print "\nWing weight:", OAS_prob.prob['wing.weight']
-    plot_eigs(OAS_prob.prob['wing.modes'])
+    # plot_eigs(OAS_prob.prob['wing.modes'], sym)

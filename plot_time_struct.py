@@ -171,7 +171,7 @@ class Display(object):
         dist = self.ax.dist
 
         for j, name in enumerate(self.names):
-            mesh0 = self.mesh[0].copy()
+            mesh0 = self.mesh[j].copy()
 
             # Change this to coarsen the mesh
             skip = 1
@@ -213,8 +213,8 @@ class Display(object):
                 self.ax.plot_wireframe(x, y, z, rstride=1, cstride=1, color='k')
 
             if self.show_tube:
-                r0 = self.r[0][::skip]
-                t0 = self.t[0][::skip]
+                r0 = self.r[j][::skip]
+                t0 = self.t[j][::skip]
                 colors = self.vonmises[self.curr_pos][::skip]
                 colors = colors / self.max_vm
                 num_circ = 12
@@ -246,12 +246,12 @@ class Display(object):
 
         lim = 0.
         for j in range(n_names):
-            ma = numpy.max(self.mesh[0], axis=(0,1,2))
+            ma = numpy.max(self.mesh[j], axis=(0,1,2))
             if ma > lim:
                 lim = ma
         lim /= float(zoom_scale)
         self.ax.auto_scale_xyz([-lim, lim], [-lim, lim], [-lim, lim])
-        self.ax.set_title("Timestep {0:0.3f}".format(self.curr_pos / 500 * 1.))
+        self.ax.set_title("{0:0.3f} secs elapsed".format(self.curr_pos / 500 * 1.))
 
         #
         # for j, name in enumerate(self.names):

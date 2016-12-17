@@ -57,11 +57,15 @@ def order_and_normalize(evalues, evectors, M):
 def Eig_matrix(M, K):
     return numpy.linalg.inv(M).dot(K)
 
-def plot_eigs(evecs, dof=0, num_modes=5):
+def plot_eigs(evecs, sym, dof=0, num_modes=5):
     fig = plt.figure()
-    lins = numpy.linspace(0, 1, len(evecs[:, 0])/6+1)
     for mode in range(num_modes):
-        full_vec = numpy.hstack((numpy.array([0]), evecs[dof::6, mode][::-1]))
+        if sym:
+            lins = numpy.linspace(0, 1, len(evecs[:, 0])/6+1)
+            full_vec = numpy.hstack((numpy.array([0]), evecs[dof::6, mode][::-1]))
+        else:
+            lins = numpy.linspace(0, 1, len(evecs[:, 0])/6)
+            full_vec = evecs[dof::6, mode][::-1]
         plt.plot(lins, full_vec, label='Mode {}'.format(mode))
     plt.legend(loc=0)
     plt.show()
@@ -403,8 +407,6 @@ class SpatialBeamFEM(Component):
         evalues_ord, evectors_ord = order_and_normalize(evalues, evectors, self.reduced_M)
         frequencies = numpy.sqrt(evalues)
         freqs_ordered = numpy.sort(frequencies)
-
-        # plot_eigs(evalues_ord, evectors_ord)
 
         unknowns['modes'] = evectors_ord
         unknowns['freqs'] = freqs_ordered
