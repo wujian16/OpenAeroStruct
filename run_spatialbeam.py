@@ -23,7 +23,7 @@ if __name__ == "__main__":
 
     # Set problem type
     prob_dict = {'type' : 'struct',
-                 'num_dt' : 602,
+                 'num_dt' : 1,
                  'final_t' : 2.}
 
     if sys.argv[1].startswith('0'):  # run analysis once

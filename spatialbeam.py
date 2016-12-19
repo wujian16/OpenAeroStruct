@@ -14,8 +14,6 @@ from openmdao.api import Component, Group
 from scipy.linalg import lu_factor, lu_solve
 import matplotlib.pyplot as plt
 
-import OAS_API
-
 try:
     import OAS_API
     fortran_flag = True
@@ -53,9 +51,6 @@ def order_and_normalize(evalues, evectors, M):
         fac = 1. / evec.T.dot(M).dot(evec)
         evec *= fac**.5
     return eigenvalues, eigenvectors
-
-def Eig_matrix(M, K):
-    return numpy.linalg.inv(M).dot(K)
 
 def plot_eigs(evecs, sym, dof=0, num_modes=5):
     fig = plt.figure()

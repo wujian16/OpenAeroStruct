@@ -209,7 +209,7 @@ class Display(object):
                     widths.append(case_data['Unknowns'][name+'.widths'])
                     sec_forces.append(case_data['Unknowns']['coupled.aero_states.' + short_name + '_sec_forces'])
                     # pick off only the first six modes
-                    self.modes.append(case_data['Unknowns']['coupled.' + short_name + '.modes'][:, :6])
+                    self.modes.append(case_data['Unknowns']['coupled.' + short_name + '.modes'][:, :12])
                     self.freqs.append(case_data['Unknowns']['coupled.' + short_name + '.freqs'])
                     self.CL.append(case_data['Unknowns'][short_name+'_perf.CL1'])
                     self.S_ref.append(case_data['Unknowns'][name+'.S_ref'])
@@ -399,8 +399,8 @@ class Display(object):
                 self.ax4.plot(span_diff, thick_vals, lw=2, c='b')
                 self.ax5.plot(span_diff, vm_vals, lw=2, c='b')
 
-                # Pick off only the first dof mode
-                dof = 0
+                # Pick off only the second dof mode
+                dof = 1
                 modes = self.modes[self.curr_pos+j]
                 modes = modes[dof::6, :]
 
@@ -504,8 +504,8 @@ class Display(object):
         self.ax.text2D(.55, .05, self.obj_key + ': {}'.format(obj_val),
             transform=self.ax.transAxes, color='k')
 
-        freq_val = round_to_n(numpy.min(self.freqs[self.curr_pos]), 7)
-        self.ax.text2D(.55, .0, 'lowest freq: {}'.format(freq_val),
+        freq_val = round_to_n(numpy.min(self.freqs[self.curr_pos])/(2*numpy.pi), 3)
+        self.ax.text2D(.55, .0, 'lowest freq: {} Hz'.format(freq_val),
             transform=self.ax.transAxes, color='k')
 
         self.ax.view_init(elev=el, azim=az)  # Reproduce view

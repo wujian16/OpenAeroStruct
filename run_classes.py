@@ -101,8 +101,11 @@ class OASProblem():
                     'W0' : 0.5 * 2.5e6,     # [N] MTOW of B777 is 3e5 kg with fuel
                     'wing_type' : 'rect',   # initial shape of the wing
                                             # either 'CRM' or 'rect'
-                    'offset' : numpy.array([0., 0., 0.]) # coordinates to offset
+                    'offset' : numpy.array([0., 0., 0.]), # coordinates to offset
                                     # the surface from its default location
+                    'prop_loads' : False,   # true if initial loads are
+                                            # proportional to panel size
+
                     }
         return defaults
 

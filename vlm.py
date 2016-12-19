@@ -39,6 +39,8 @@ try:
 except:
     fortran_flag = False
 
+horseshoe = False
+
 def view_mat(mat):
     """ Helper function used to visually examine matrices. """
     import matplotlib.pyplot as plt
@@ -84,6 +86,9 @@ def _calc_vorticity(A, B, P):
            (r1_mag * r2_mag * (r1_mag * r2_mag + r1.dot(r2)))
 
 
+
+
+
 def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
     """
     Compute the aerodynamic influence coefficient matrix
@@ -96,7 +101,7 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
 
     This creates mtx with blocks corresponding to each lifting surface's
     effects on other lifting surfaces. The block diagonal portions
-    correspond to each lifting surface's influencen on itself. For a single
+    correspond to each lifting surface's influence on itself. For a single
     lifting surface, this is the entire mtx.
 
     Parameters
@@ -183,48 +188,34 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                                                          mesh, skip, symmetry)
             # Python matrix assembly
             else:
-                # Spanwise loop through horseshoe elements
-                for el_j in xrange(ny_ - 1):
-                    el_loc_j = el_j * (nx_ - 1)
-                    C_te = mesh[-1, el_j + 1, :]
-                    D_te = mesh[-1, el_j + 0, :]
 
-                    # Mirror the horseshoe vortex points
-                    if symmetry:
-                        C_te_sym = C_te.copy()
-                        D_te_sym = D_te.copy()
-                        C_te_sym[1] = -C_te_sym[1]
-                        D_te_sym[1] = -D_te_sym[1]
+                if horseshoe:
+                    print 'HORSESHOE'
+                    # Spanwise loop through horseshoe elements
+                    for el_j in xrange(ny_ - 1):
+                        el_loc_j = el_j * (nx_ - 1)
+                        C_te = mesh[-1, el_j + 1, :]
+                        D_te = mesh[-1, el_j + 0, :]
 
-                    # Spanwise loop through control points
-                    for cp_j in xrange(ny - 1):
-                        cp_loc_j = cp_j * (nx - 1)
+                        # Mirror the horseshoe vortex points
+                        if symmetry:
+                            C_te_sym = C_te.copy()
+                            D_te_sym = D_te.copy()
+                            C_te_sym[1] = -C_te_sym[1]
+                            D_te_sym[1] = -D_te_sym[1]
 
-                        # Chordwise loop through control points
-                        for cp_i in xrange(nx - 1):
-                            cp_loc = cp_i + cp_loc_j
+                        # Spanwise loop through control points
+                        for cp_j in xrange(ny - 1):
+                            cp_loc_j = cp_j * (nx - 1)
 
-                            P = pts[cp_i, cp_j]
+                            # Chordwise loop through control points
+                            for cp_i in xrange(nx - 1):
+                                cp_loc = cp_i + cp_loc_j
 
-                            r1 = P - D_te
-                            r2 = P - C_te
+                                P = pts[cp_i, cp_j]
 
-                            r1_mag = norm(r1)
-                            r2_mag = norm(r2)
-
-                            t1 = numpy.cross(u, r2) / \
-                                (r2_mag * (r2_mag - u.dot(r2)))
-                            t3 = numpy.cross(u, r1) / \
-                                (r1_mag * (r1_mag - u.dot(r1)))
-
-                            # AIC contribution from trailing vortex filaments
-                            # coming off the trailing edge
-                            trailing = t1 - t3
-
-                            # Calculate the effects across the symmetry plane
-                            if symmetry:
-                                r1 = P - D_te_sym
-                                r2 = P - C_te_sym
+                                r1 = P - D_te
+                                r2 = P - C_te
 
                                 r1_mag = norm(r1)
                                 r2_mag = norm(r2)
@@ -234,80 +225,157 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                                 t3 = numpy.cross(u, r1) / \
                                     (r1_mag * (r1_mag - u.dot(r1)))
 
-                                trailing += t3 - t1
+                                # AIC contribution from trailing vortex filaments
+                                # coming off the trailing edge
+                                trailing = t1 - t3
 
-                            edges = 0
-
-                            # Chordwise loop through horseshoe elements in
-                            # reversed order, starting with the panel closest
-                            # to the leading edge. This is done to sum the
-                            # AIC contributions from the side vortex filaments
-                            # as we loop through the elements
-                            for el_i in reversed(xrange(nx_ - 1)):
-                                el_loc = el_i + el_loc_j
-
-                                A = bpts[el_i, el_j + 0, :]
-                                B = bpts[el_i, el_j + 1, :]
-
-                                # Check if this is the last panel; if so, use
-                                # the trailing edge mesh points for C & D, else
-                                # use the directly aft panel's bound points
-                                # for C & D
-                                if el_i == nx_ - 2:
-                                    C = mesh[-1, el_j + 1, :]
-                                    D = mesh[-1, el_j + 0, :]
-                                else:
-                                    C = bpts[el_i + 1, el_j + 1, :]
-                                    D = bpts[el_i + 1, el_j + 0, :]
-
-                                # Calculate and store the contributions from
-                                # the vortex filaments on the sides of the
-                                # panels, adding as we progress through the
-                                # panels
-                                edges += _calc_vorticity(B, C, P)
-                                edges += _calc_vorticity(D, A, P)
-
-                                # Mirror the horseshoe vortex points and
-                                # calculate the effects across
-                                # the symmetry plane
+                                # Calculate the effects across the symmetry plane
                                 if symmetry:
-                                    A_sym = A.copy()
-                                    B_sym = B.copy()
-                                    C_sym = C.copy()
-                                    D_sym = D.copy()
-                                    A_sym[1] = -A_sym[1]
-                                    B_sym[1] = -B_sym[1]
-                                    C_sym[1] = -C_sym[1]
-                                    D_sym[1] = -D_sym[1]
+                                    r1 = P - D_te_sym
+                                    r2 = P - C_te_sym
 
-                                    edges += _calc_vorticity(C_sym, B_sym, P)
-                                    edges += _calc_vorticity(A_sym, D_sym, P)
+                                    r1_mag = norm(r1)
+                                    r2_mag = norm(r2)
 
-                                # If skip, do not include the contributions
-                                # from the panel's bound vortex filament, as
-                                # this causes a singularity when we're taking
-                                # the influence of a panel on its own
-                                # collocation point. This true for the drag
-                                # computation and false for circulation
-                                # computation, due to the different collocation
-                                # points.
-                                if skip and el_loc == cp_loc:
-                                    if symmetry:
-                                        bound = _calc_vorticity(B_sym, A_sym, P)
+                                    t1 = numpy.cross(u, r2) / \
+                                        (r2_mag * (r2_mag - u.dot(r2)))
+                                    t3 = numpy.cross(u, r1) / \
+                                        (r1_mag * (r1_mag - u.dot(r1)))
+
+                                    trailing += t3 - t1
+
+                                edges = 0
+
+                                # Chordwise loop through horseshoe elements in
+                                # reversed order, starting with the panel closest
+                                # to the leading edge. This is done to sum the
+                                # AIC contributions from the side vortex filaments
+                                # as we loop through the elements
+                                for el_i in reversed(xrange(nx_ - 1)):
+                                    el_loc = el_i + el_loc_j
+
+                                    A = bpts[el_i, el_j + 0, :]
+                                    B = bpts[el_i, el_j + 1, :]
+
+                                    # Check if this is the last panel; if so, use
+                                    # the trailing edge mesh points for C & D, else
+                                    # use the directly aft panel's bound points
+                                    # for C & D
+                                    if el_i == nx_ - 2:
+                                        C = mesh[-1, el_j + 1, :]
+                                        D = mesh[-1, el_j + 0, :]
                                     else:
-                                        bound = numpy.zeros((3))
-                                    small_mat[cp_loc, el_loc, :] = \
-                                        trailing + edges + bound
-                                else:
-                                    bound = _calc_vorticity(A, B, P)
+                                        C = bpts[el_i + 1, el_j + 1, :]
+                                        D = bpts[el_i + 1, el_j + 0, :]
 
-                                    # Account for symmetry by including the
-                                    # mirrored bound vortex
+                                    # Calculate and store the contributions from
+                                    # the vortex filaments on the sides of the
+                                    # panels, adding as we progress through the
+                                    # panels
+                                    edges += _calc_vorticity(B, C, P)
+                                    edges += _calc_vorticity(D, A, P)
+
+                                    # Mirror the horseshoe vortex points and
+                                    # calculate the effects across
+                                    # the symmetry plane
                                     if symmetry:
-                                        bound += _calc_vorticity(B_sym, A_sym, P)
+                                        A_sym = A.copy()
+                                        B_sym = B.copy()
+                                        C_sym = C.copy()
+                                        D_sym = D.copy()
+                                        A_sym[1] = -A_sym[1]
+                                        B_sym[1] = -B_sym[1]
+                                        C_sym[1] = -C_sym[1]
+                                        D_sym[1] = -D_sym[1]
 
-                                    small_mat[cp_loc, el_loc, :] = \
-                                        trailing + edges + bound
+                                        edges += _calc_vorticity(C_sym, B_sym, P)
+                                        edges += _calc_vorticity(A_sym, D_sym, P)
+
+                                    # If skip, do not include the contributions
+                                    # from the panel's bound vortex filament, as
+                                    # this causes a singularity when we're taking
+                                    # the influence of a panel on its own
+                                    # collocation point. This true for the drag
+                                    # computation and false for circulation
+                                    # computation, due to the different collocation
+                                    # points.
+                                    if skip and el_loc == cp_loc:
+                                        if symmetry:
+                                            bound = _calc_vorticity(B_sym, A_sym, P)
+                                        else:
+                                            bound = numpy.zeros((3))
+                                        small_mat[cp_loc, el_loc, :] = \
+                                            trailing + edges + bound
+                                    else:
+                                        bound = _calc_vorticity(A, B, P)
+
+                                        # Account for symmetry by including the
+                                        # mirrored bound vortex
+                                        if symmetry:
+                                            bound += _calc_vorticity(B_sym, A_sym, P)
+
+                                        small_mat[cp_loc, el_loc, :] = \
+                                            trailing + edges + bound
+
+                else:
+                    print 'RINGS'
+
+                    # Spanwise loop through horseshoe elements
+                    for el_j in xrange(ny_ - 1):
+                        el_loc_j = el_j * (nx_ - 1)
+
+                        # Chordwise loop through horseshoe elements in
+                        # reversed order, starting with the panel closest
+                        # to the leading edge. This is done to sum the
+                        # AIC contributions from the side vortex filaments
+                        # as we loop through the elements
+                        for el_i in xrange(nx_ - 1):
+                            el_loc = el_i + el_loc_j
+
+                            A = bpts[el_i, el_j + 0, :]
+                            B = bpts[el_i, el_j + 1, :]
+
+                            # Check if this is the last panel; if so, use
+                            # the trailing edge mesh points for C & D, else
+                            # use the directly aft panel's bound points
+                            # for C & D
+                            if el_i == nx_ - 2:
+                                C = (mesh[-1, el_j + 1, :] - bpts[el_i, el_j + 1, :]) * 1.e6 + bpts[el_i, el_j + 1, :]
+                                D = (mesh[-1, el_j + 0, :] - bpts[el_i, el_j + 0, :]) * 1.e6 + bpts[el_i, el_j + 0, :]
+                            else:
+                                C = bpts[el_i + 1, el_j + 1, :]
+                                D = bpts[el_i + 1, el_j + 0, :]
+
+                            # Spanwise loop through control points
+                            for cp_j in xrange(ny - 1):
+                                cp_loc_j = cp_j * (nx - 1)
+
+                                # Chordwise loop through control points
+                                for cp_i in xrange(nx - 1):
+                                    cp_loc = cp_i + cp_loc_j
+
+                                    P = pts[cp_i, cp_j]
+
+                                    gamma = 0.
+                                    gamma += _calc_vorticity(B, C, P)
+                                    gamma += _calc_vorticity(D, A, P)
+
+                                    # if not (el_loc == cp_loc and skip):
+                                    #     gamma += _calc_vorticity(A, B, P)
+                                    if not skip:
+                                        gamma += _calc_vorticity(A, B, P)
+                                    if not (cp_i-1 == el_i and el_j == cp_j and skip):
+                                        gamma += _calc_vorticity(C, D, P)
+
+                                    # If skip, do not include the contributions
+                                    # from the panel's bound vortex filament, as
+                                    # this causes a singularity when we're taking
+                                    # the influence of a panel on its own
+                                    # collocation point. This true for the drag
+                                    # computation and false for circulation
+                                    # computation, due to the different collocation
+                                    # points.
+                                    small_mat[cp_loc, el_loc, :] = gamma
 
             # Populate the full-size matrix with these surface-surface AICs
             mtx[i_panels:i_panels+n_panels,
@@ -375,7 +443,6 @@ def _assemble_AIC_mtx_d(mtx, params, surfaces, skip=False):
 
         # Variable names with a trailing underscore correspond to the lifting
         # surface being examined, not the collocation point
-        name_ = surface_['name']
         nx_ = surface_['num_x']
         ny_ = surface_['num_y']
         n_ = nx_ * ny_
@@ -394,7 +461,6 @@ def _assemble_AIC_mtx_d(mtx, params, surfaces, skip=False):
 
         for surface in surfaces:
             # These variables correspond to the collocation points
-            name = surface['name']
             nx = surface['num_x']
             ny = surface['num_y']
             n = nx * ny
@@ -470,7 +536,6 @@ class VLMGeometry(Component):
         self.nx = surface['num_x']
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
-        name = surface['name']
         self.fem_origin = surface['fem_origin']
 
         self.add_param('def_mesh', val=numpy.zeros((self.nx, self.ny, 3),
@@ -486,7 +551,6 @@ class VLMGeometry(Component):
         return numpy.sqrt(numpy.sum((B - A)**2, axis=axis))
 
     def solve_nonlinear(self, params, unknowns, resids):
-        name = self.surface['name']
         mesh = params['def_mesh']
 
         # Compute the bound points at 1/4 chord
@@ -525,7 +589,6 @@ class VLMGeometry(Component):
         """ Jacobian for geometry."""
 
         jac = self.alloc_jacobian()
-        name = self.surface['name']
 
         fd_jac = self.complex_step_jacobian(params, unknowns, resids,
                                             fd_params=['def_mesh'],
@@ -657,13 +720,11 @@ class VLMCirculations(Component):
 
     def solve_nonlinear(self, params, unknowns, resids):
         """ Solve the linear system to obtain circulations. """
-        name = self.surface['name']
         self._assemble_system(params)
         unknowns['circulations'] = numpy.linalg.solve(self.mtx, self.rhs)
 
     def apply_nonlinear(self, params, unknowns, resids):
         """ Compute the residuals of the linear system. """
-        name = self.surface['name']
         self._assemble_system(params)
 
         circ = unknowns['circulations']
@@ -671,7 +732,6 @@ class VLMCirculations(Component):
 
     def linearize(self, params, unknowns, resids):
         """ Jacobian for circulations."""
-        name = self.surface['name']
         self.lup = lu_factor(self.mtx.real)
         jac = self.alloc_jacobian()
 
@@ -788,7 +848,9 @@ class VLMForces(Component):
         i = 0
         for surface in self.surfaces:
             name = surface['name']
-            num_panels = (surface['num_x'] - 1) * (surface['num_y'] - 1)
+            nx = surface['num_x']
+            ny = surface['num_y']
+            num_panels = (nx - 1) * (ny - 1)
 
             b_pts = params[name+'b_pts']
 
@@ -799,12 +861,31 @@ class VLMForces(Component):
             cross = numpy.cross(self.v[i:i+num_panels],
                                 bound.reshape(-1, bound.shape[-1], order='F'))
 
-            sec_forces = numpy.zeros(((surface['num_x']-1)*(surface['num_y']-1), 3), dtype='complex')
-            # Compute the sectional forces acting on each panel
-            for ind in xrange(3):
-                sec_forces[:, ind] = \
-                    (params['rho'] * circ[i:i+num_panels] * cross[:, ind])
-            unknowns[name+'sec_forces'] = sec_forces.reshape((surface['num_x']-1, surface['num_y']-1, 3), order='F')
+            widths = numpy.linalg.norm(params[name+'def_mesh'][0, 1:, :] - \
+                params[name+'def_mesh'][0, :-1, :], axis=1)
+
+            sec_forces = numpy.zeros((num_panels, 3), dtype='complex')
+
+            if horseshoe:
+                # Compute the sectional forces acting on each panel
+                for ind in xrange(3):
+                    sec_forces[:, ind] = \
+                        (params['rho'] * circ[i:i+num_panels] * cross[:, ind])
+                unknowns[name+'sec_forces'] = sec_forces.reshape((nx-1, ny-1, 3), order='F')
+
+            else:
+                circ_slice = circ[i:i+num_panels].reshape(nx-1, ny-1, order='F')
+                drag = numpy.zeros((nx-1, ny-1))
+                # Compute the sectional forces acting on each panel
+                for ind in xrange(3):
+                    sec_forces[:ny-1, ind] = \
+                        params['rho'] * circ_slice[0, :] * cross[:, ind][:ny-1]
+
+                    for j in xrange(1, nx - 1):
+                        sec_forces[j*(ny-1):(j+1)*(ny-1), ind] = \
+                            (params['rho'] * (circ_slice[j, :] - circ_slice[j-1, :]) * cross[j*(ny-1):(j+1)*(ny-1), ind])
+                unknowns[name+'sec_forces'] = sec_forces.reshape((nx-1, ny-1, 3), order='C')
+            print unknowns[name+'sec_forces']
 
             i += num_panels
 
@@ -883,7 +964,6 @@ class VLMLiftDrag(Component):
         self.nx = surface['num_x']
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
-        name = surface['name']
 
         self.add_param('sec_forces', val=numpy.zeros((self.nx - 1, self.ny - 1, 3)))
         self.add_param('alpha', val=3.)
@@ -899,7 +979,6 @@ class VLMLiftDrag(Component):
         self.deriv_options['form'] = 'central'
 
     def solve_nonlinear(self, params, unknowns, resids):
-        name = self.surface['name']
         alpha = params['alpha'] * numpy.pi / 180.
         forces = params['sec_forces'].reshape(-1, 3)
         cosa = numpy.cos(alpha)
@@ -926,6 +1005,8 @@ class VLMLiftDrag(Component):
         # Compute the induced drag force on each lifting surface
         unknowns['D'] = \
             numpy.sum( forces[:, 0] * cosa + forces[:, 2] * sina)
+        print forces[:, 0] * cosa
+        print forces[:, 2] * sina
 
         # Compute the drag contribution from skin friction
         D_f = Cf * rho * v**2 / 2. * S_ref
@@ -939,7 +1020,6 @@ class VLMLiftDrag(Component):
         """ Jacobian for lift and drag."""
 
         jac = self.alloc_jacobian()
-        name = self.surface['name']
 
         # Analytic derivatives for sec_forces
         alpha = params['alpha'] * numpy.pi / 180.
@@ -1000,7 +1080,6 @@ class VLMCoeffs(Component):
         self.nx = surface['num_x']
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
-        name = surface['name']
 
         self.add_param('S_ref', val=0.)
         self.add_param('L', val=0.)
@@ -1014,7 +1093,6 @@ class VLMCoeffs(Component):
         self.deriv_options['form'] = 'central'
 
     def solve_nonlinear(self, params, unknowns, resids):
-        name = self.surface['name']
         S_ref = params['S_ref']
         rho = params['rho']
         v = params['v']
@@ -1052,7 +1130,6 @@ class TotalLift(Component):
         self.nx = surface['num_x']
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
-        name = surface['name']
 
         self.add_param('CL1', val=0.)
         self.add_output('CL', val=0.)
@@ -1062,7 +1139,6 @@ class TotalLift(Component):
         self.deriv_options['form'] = 'central'
 
     def solve_nonlinear(self, params, unknowns, resids):
-        name = self.surface['name']
         unknowns['CL'] = params['CL1'] + self.CL0
 
     def linearize(self, params, unknowns, resids):
@@ -1096,7 +1172,6 @@ class TotalDrag(Component):
         self.nx = surface['num_x']
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
-        name = surface['name']
 
         self.add_param('CDi', val=0.)
         self.add_output('CD', val=0.)
@@ -1107,7 +1182,6 @@ class TotalDrag(Component):
         self.deriv_options['form'] = 'central'
 
     def solve_nonlinear(self, params, unknowns, resids):
-        name = self.surface['name']
         unknowns['CD'] = params['CDi'] + self.CD0
 
     def linearize(self, params, unknowns, resids):
