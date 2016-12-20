@@ -461,24 +461,21 @@ class VLMGeometry(Component):
 
     """
 
-    def __init__(self, surface):
+    def __init__(self, surface, t, dt):
         super(VLMGeometry, self).__init__()
 
         self.surface = surface
 
-        self.ny = surface['num_y']
-        self.nx = surface['num_x']
-        self.n = self.nx * self.ny
-        self.mesh = surface['mesh']
-        self.fem_origin = surface['fem_origin']
+        ny = surface['num_y']
+        nx = surface['num_x']
 
-        self.add_param('def_mesh', val=numpy.zeros((self.nx, self.ny, 3),
+        self.add_param('def_mesh', val=numpy.zeros((nx, ny, 3),
                        dtype="complex"))
-        self.add_output('b_pts', val=numpy.zeros((self.nx-1, self.ny, 3),
+        self.add_output('b_pts', val=numpy.zeros((nx-1, ny, 3),
                         dtype="complex"))
-        self.add_output('c_pts', val=numpy.zeros((self.nx-1, self.ny-1, 3)))
-        self.add_output('widths', val=numpy.zeros((self.nx-1, self.ny-1)))
-        self.add_output('normals', val=numpy.zeros((self.nx-1, self.ny-1, 3)))
+        self.add_output('c_pts', val=numpy.zeros((nx-1, ny-1, 3)))
+        self.add_output('widths', val=numpy.zeros((nx-1, ny-1)))
+        self.add_output('normals', val=numpy.zeros((nx-1, ny-1, 3)))
         self.add_output('S_ref', val=0.)
 
     def _get_lengths(self, A, B, axis):
@@ -547,6 +544,30 @@ class VLMGeometry(Component):
         return jac
 
 
+class WakeGeometry(Component):
+    """
+    """
+
+    def __init__(self, surface, t, dt):
+        super(WakeGeometry, self).__init__()
+
+        self.surface = surface
+        self.ny = surface['num_y']
+        self.nx = surface['num_x']
+
+        self.add_param('def_mesh', val=numpy.zeros((self.nx, self.ny, 3),
+                       dtype="complex"))
+        self.add_output('wake_mesh', val=numpy.zeros((t, self.ny, 3),
+                        dtype="complex"))
+
+    def solve_nonlinear(self, params, unknowns, resids):
+        mesh = params['def_mesh']
+
+
+    def linearize(self, params, unknowns, resids):
+        """ Jacobian for wake geometry."""
+
+
 class VLMCirculations(Component):
     """
     Compute the circulations based on the AIC matrix and the panel velocities.
@@ -585,19 +606,17 @@ class VLMCirculations(Component):
 
         for surface in surfaces:
             self.surface = surface
-            self.ny = surface['num_y']
-            self.nx = surface['num_x']
-            self.n = self.nx * self.ny
-            self.mesh = surface['mesh']
+            ny = surface['num_y']
+            nx = surface['num_x']
             name = surface['name']
 
-            self.add_param(name+'def_mesh', val=numpy.zeros((self.nx, self.ny, 3),
+            self.add_param(name+'def_mesh', val=numpy.zeros((nx, ny, 3),
                            dtype="complex"))
-            self.add_param(name+'b_pts', val=numpy.zeros((self.nx-1, self.ny, 3),
+            self.add_param(name+'b_pts', val=numpy.zeros((nx-1, ny, 3),
                            dtype="complex"))
-            self.add_param(name+'c_pts', val=numpy.zeros((self.nx-1, self.ny-1, 3),
+            self.add_param(name+'c_pts', val=numpy.zeros((nx-1, ny-1, 3),
                            dtype="complex"))
-            self.add_param(name+'normals', val=numpy.zeros((self.nx-1, self.ny-1, 3)))
+            self.add_param(name+'normals', val=numpy.zeros((nx-1, ny-1, 3)))
 
         self.add_param('v', val=prob_dict['v'])
         self.add_param('alpha', val=prob_dict['alpha'])
@@ -738,12 +757,12 @@ class VLMForces(Component):
         for surface in surfaces:
             name = surface['name']
             tot_panels += (surface['num_x'] - 1) * (surface['num_y'] - 1)
-            self.ny = surface['num_y']
-            self.nx = surface['num_x']
+            ny = surface['num_y']
+            nx = surface['num_x']
 
-            self.add_param(name+'def_mesh', val=numpy.zeros((self.nx, self.ny, 3), dtype='complex'))
-            self.add_param(name+'b_pts', val=numpy.zeros((self.nx-1, self.ny, 3), dtype='complex'))
-            self.add_output(name+'sec_forces', val=numpy.zeros((self.nx-1, self.ny-1, 3), dtype='complex'))
+            self.add_param(name+'def_mesh', val=numpy.zeros((nx, ny, 3), dtype='complex'))
+            self.add_param(name+'b_pts', val=numpy.zeros((nx-1, ny, 3), dtype='complex'))
+            self.add_output(name+'sec_forces', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
 
         self.tot_panels = tot_panels
         self.add_param('circulations', val=numpy.zeros((tot_panels)))
@@ -828,9 +847,6 @@ class VLMForces(Component):
 
         return jac
 
-    # def apply_linear(self, params, unknowns, dparams, dunknowns, dresids, mode):
-    #     print mode, dresids['sec_forces']
-
 
 class VLMLiftDrag(Component):
     """
@@ -873,12 +889,10 @@ class VLMLiftDrag(Component):
         super(VLMLiftDrag, self).__init__()
 
         self.surface = surface
-        self.ny = surface['num_y']
-        self.nx = surface['num_x']
-        self.n = self.nx * self.ny
-        self.mesh = surface['mesh']
+        ny = surface['num_y']
+        nx = surface['num_x']
 
-        self.add_param('sec_forces', val=numpy.zeros((self.nx - 1, self.ny - 1, 3)))
+        self.add_param('sec_forces', val=numpy.zeros((nx - 1, ny - 1, 3)))
         self.add_param('alpha', val=3.)
         self.add_param('Re', val=5.e6)
         self.add_param('M', val=.84)
@@ -987,18 +1001,14 @@ class VLMCoeffs(Component):
         super(VLMCoeffs, self).__init__()
 
         self.surface = surface
-        self.ny = surface['num_y']
-        self.nx = surface['num_x']
-        self.n = self.nx * self.ny
-        self.mesh = surface['mesh']
 
         self.add_param('S_ref', val=0.)
         self.add_param('L', val=0.)
         self.add_param('D', val=0.)
         self.add_param('v', val=0.)
         self.add_param('rho', val=0.)
-        self.add_output('CL1', val=0.)
-        self.add_output('CDi', val=0.)
+        self.add_output('CL', val=0.)
+        self.add_output('CD', val=0.)
 
         self.deriv_options['type'] = 'cs'
         self.deriv_options['form'] = 'central'
@@ -1013,98 +1023,13 @@ class VLMCoeffs(Component):
         if self.surface['symmetry']:
             S_ref *= 2
 
-        unknowns['CL1'] = L / (0.5 * rho * v**2 * S_ref)
-        unknowns['CDi'] = D / (0.5 * rho * v**2 * S_ref)
-
-class TotalLift(Component):
-    """ Calculate total lift in force units.
-
-    Parameters
-    ----------
-    CL1 : array_like
-        Induced coefficient of lift (CL) for each lifting surface.
-
-    Returns
-    -------
-    CL : array_like
-        Total coefficient of lift (CL) for each lifting surface.
-    CL_wing : float
-        CL of the main wing, used for CL constrained optimization.
-
-    """
-
-    def __init__(self, surface):
-        super(TotalLift, self).__init__()
-
-        self.surface = surface
-        self.ny = surface['num_y']
-        self.nx = surface['num_x']
-        self.n = self.nx * self.ny
-        self.mesh = surface['mesh']
-
-        self.add_param('CL1', val=0.)
-        self.add_output('CL', val=0.)
-        self.CL0 = surface['CL0']
-
-        self.deriv_options['type'] = 'cs'
-        self.deriv_options['form'] = 'central'
-
-    def solve_nonlinear(self, params, unknowns, resids):
-        unknowns['CL'] = params['CL1'] + self.CL0
-
-    def linearize(self, params, unknowns, resids):
-        jac = self.alloc_jacobian()
-        jac['CL', 'CL1'][:] = numpy.eye(self.num_surf)
-        return jac
-
-
-class TotalDrag(Component):
-    """ Calculate total drag in force units.
-
-    Parameters
-    ----------
-    CDi : float
-        Induced coefficient of drag (CD) the each lifting surface.
-
-    Returns
-    -------
-    CD : float
-        Total coefficient of drag (CD) the each lifting surface.
-    CD_wing : float
-        CD of the main wing, used for CD minimization.
-
-    """
-
-    def __init__(self, surface):
-        super(TotalDrag, self).__init__()
-
-        self.surface = surface
-        self.ny = surface['num_y']
-        self.nx = surface['num_x']
-        self.n = self.nx * self.ny
-        self.mesh = surface['mesh']
-
-        self.add_param('CDi', val=0.)
-        self.add_output('CD', val=0.)
-
-        self.CD0 = surface['CD0']
-
-        self.deriv_options['type'] = 'cs'
-        self.deriv_options['form'] = 'central'
-
-    def solve_nonlinear(self, params, unknowns, resids):
-        unknowns['CD'] = params['CDi'] + self.CD0
-
-    def linearize(self, params, unknowns, resids):
-        jac = self.alloc_jacobian()
-        jac['CD', 'CDi'][:] = numpy.eye(self.num_surf)
-        return jac
-
+        unknowns['CL'] = L / (0.5 * rho * v**2 * S_ref) + self.surface['CL0']
+        unknowns['CD'] = D / (0.5 * rho * v**2 * S_ref) + self.surface['CD0']
 
 class VLMStates(Group):
     """ Group that contains the aerodynamic states. """
 
-    def __init__(self, surfaces, prob_dict):
+    def __init__(self, surfaces, prob_dict, t, dt):
         super(VLMStates, self).__init__()
 
         self.add('circulations',
@@ -1114,13 +1039,11 @@ class VLMStates(Group):
                  VLMForces(surfaces, prob_dict),
                  promotes=['*'])
 
-
-
 class VLMFunctionals(Group):
     """ Group that contains the aerodynamic functionals used to evaluate
     performance. """
 
-    def __init__(self, surface):
+    def __init__(self, surface, t, dt):
         super(VLMFunctionals, self).__init__()
 
         self.add('liftdrag',
@@ -1128,10 +1051,4 @@ class VLMFunctionals(Group):
                  promotes=['*'])
         self.add('coeffs',
                  VLMCoeffs(surface),
-                 promotes=['*'])
-        self.add('CL',
-                 TotalLift(surface),
-                 promotes=['*'])
-        self.add('CD',
-                 TotalDrag(surface),
                  promotes=['*'])

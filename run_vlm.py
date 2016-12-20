@@ -18,6 +18,8 @@ from run_classes import OASProblem
 
 if __name__ == "__main__":
 
+    st = time()
+
     # Set problem type
     prob_dict = {'type' : 'aero'}
 
@@ -75,6 +77,8 @@ if __name__ == "__main__":
     # Actually run the problem
     OAS_prob.run()
 
-    print "\nWing CL:", OAS_prob.prob['wing_perf.CL']
-    print "Wing CD:", OAS_prob.prob['wing_perf.CD']
-    print 'L/D', OAS_prob.prob['wing_perf.CL'] / OAS_prob.prob['wing_perf.CD']
+    print "\nWing CL:", OAS_prob.prob['wing_perf' + '.CL']
+    print "Wing CD:", OAS_prob.prob['wing_perf' + '.CD']
+    print 'L/D', OAS_prob.prob['wing_perf' + '.CL'] / OAS_prob.prob['wing_perf' + '.CD']
+    print "Time elapsed:", numpy.round(time() - st, 4), "secs"
+    print

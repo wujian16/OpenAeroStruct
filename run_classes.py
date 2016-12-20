@@ -359,13 +359,8 @@ class OASProblem():
             name = surface['name']
             tmp_group = Group()
 
-            # Hardcoded for 510 project
-            if surface['wing_type'] == 'CRM':
-                surface['t'] = surface['r'] / 200
-            else:
-                surface['r'] = surface['r'] / 3
-                surface['t'] = surface['r'] / 120
-
+            surface['r'] = surface['r'] / 5
+            surface['t'] = surface['r'] / 20
 
             # Add independent variables that do not belong to a specific component.
             # Note that these are the only ones necessary for structual-only
@@ -476,9 +471,6 @@ class OASProblem():
             tmp_group.add('def_mesh',
                      TransferDisplacements(surface),
                      promotes=['*'])
-            tmp_group.add('vlmgeom',
-                     VLMGeometry(surface),
-                     promotes=['*'])
 
             # Add tmp_group to the problem as the name of the surface.
             # Note that is a group and performance group for each
@@ -487,10 +479,6 @@ class OASProblem():
             name = name_orig
             exec(name + ' = tmp_group')
             exec('root.add("' + name + '", ' + name + ', promotes=[])')
-
-            # Add a performance group for each surface
-            name = name_orig + '_perf'
-            exec('root.add("' + name + '", ' + 'VLMFunctionals(surface)' + ', promotes=["v", "alpha", "M", "Re", "rho"])')
 
         # Add problem information as an independent variables component
         prob_vars = [('v', self.prob_dict['v']),
@@ -507,30 +495,67 @@ class OASProblem():
         # While other components only depends on a single surface,
         # this component requires information from all surfaces because
         # each surface interacts with the others.
-        root.add('aero_states',
-                 VLMStates(self.surfaces, self.prob_dict),
-                 promotes=['circulations', 'v', 'alpha', 'rho'])
+        dt = self.prob_dict['final_t'] / self.prob_dict['num_dt']
+        if self.prob_dict['num_dt'] == 1:
+            transient = False
+        else:
+            transient = True
 
-        # Explicitly connect parameters from each surface's group and the common
-        # 'aero_states' group.
-        # This is necessary because the VLMStates component requires information
-        # from each surface, but this information is stored within each
-        # surface's group.
-        for surface in self.surfaces:
-            name = surface['name']
+        # Loop over all timesteps desired and create groups
+        for t in xrange(self.prob_dict['num_dt']):
+            ts_group_name = 'timestep_' + str(t)
 
-            # Perform the connections with the modified names within the
-            # 'aero_states' group.
-            root.connect(name[:-1] + '.def_mesh', 'aero_states.' + name + 'def_mesh')
-            root.connect(name[:-1] + '.b_pts', 'aero_states.' + name + 'b_pts')
-            root.connect(name[:-1] + '.c_pts', 'aero_states.' + name + 'c_pts')
-            root.connect(name[:-1] + '.normals', 'aero_states.' + name + 'normals')
+            if transient:
+                ts_group = Group()
+            else:
+                ts_group = root
 
-            # Connect the results from 'aero_states' to the performance groups
-            root.connect('aero_states.' + name + 'sec_forces', name + 'perf' + '.sec_forces')
+            ts_group.add('aero_states',
+                     VLMStates(self.surfaces, self.prob_dict, t, dt),
+                     promotes=['v', 'alpha', 'rho'])
 
-            # Connect S_ref for performance calcs
-            root.connect(name[:-1] + '.S_ref', name + 'perf' + '.S_ref')
+            # Loop over each surface in the surfaces list
+            for surface in self.surfaces:
+
+                # Get the surface name and create a group to contain components
+                # only for this surface
+                name = surface['name']
+
+                ts_group.add(name + 'geom',
+                         VLMGeometry(surface, t, dt),
+                         promotes=[])
+
+                # Add a performance group for each surface
+                name = name + 'perf'
+                exec('ts_group.add("' + name + '", ' + 'VLMFunctionals(surface, t, dt)' + ', promotes=["v", "alpha", "M", "Re", "rho"])')
+
+                # Explicitly connect parameters from each surface's group and the common
+                # 'aero_states' group.
+                # This is necessary because the VLMStates component requires information
+                # from each surface, but this information is stored within each
+                # surface's group.
+                name = surface['name']
+
+                # Perform the connections with the modified names within the
+                # 'aero_states' group.
+                if transient:
+                    root.connect(name[:-1] + '.def_mesh', ts_group_name + '.' + name + 'geom.def_mesh')
+                else:
+                    root.connect(name[:-1] + '.def_mesh', name + 'geom.def_mesh')
+
+                ts_group.connect(name + 'geom.def_mesh', 'aero_states.' + name + 'def_mesh')
+                ts_group.connect(name + 'geom.b_pts', 'aero_states.' + name + 'b_pts')
+                ts_group.connect(name + 'geom.c_pts', 'aero_states.' + name + 'c_pts')
+                ts_group.connect(name + 'geom.normals', 'aero_states.' + name + 'normals')
+
+                # Connect the results from 'aero_states' to the performance groups
+                ts_group.connect('aero_states.' + name + 'sec_forces', name + 'perf.sec_forces')
+
+                # Connect S_ref for performance calcs
+                ts_group.connect(name + 'geom.S_ref', name + 'perf.S_ref')
+
+            if transient:
+                exec('root.add("' + ts_group_name + '", ts_group, promotes=["v", "alpha", "M", "Re", "rho"])')
 
         # Actually set up the problem
         self.setup_prob()
@@ -552,6 +577,13 @@ class OASProblem():
         # Create the problem and assign the root group
         self.prob = Problem()
         self.prob.root = root
+
+        dt = self.prob_dict['final_t'] / self.prob_dict['num_dt']
+        if self.prob_dict['num_dt'] == 1:
+            transient = False
+        else:
+            transient = True
+        t = 1
 
         # Loop over each surface in the surfaces list
         for surface in self.surfaces:
@@ -607,10 +639,13 @@ class OASProblem():
                      TransferDisplacements(surface),
                      promotes=['*'])
             tmp_group.add('aero_geom',
-                     VLMGeometry(surface),
+                     VLMGeometry(surface, t, dt),
                      promotes=['*'])
+
+            SBFEM = SpatialBeamFEM(surface, dt, self.prob_dict['num_dt'])
+
             tmp_group.add('struct_states',
-                     SpatialBeamStates(surface),
+                     SpatialBeamStates(surface, SBFEM, dt),
                      promotes=['*'])
             tmp_group.struct_states.ln_solver = LinearGaussSeidel()
 
@@ -629,7 +664,7 @@ class OASProblem():
                      SpatialBeamFunctionals(surface),
                      promotes=['*'])
             tmp_group.add('aero_funcs',
-                     VLMFunctionals(surface),
+                     VLMFunctionals(surface, t, dt),
                      promotes=['*'])
 
             name = name_orig + 'perf'
@@ -639,7 +674,7 @@ class OASProblem():
         # Add a single 'aero_states' component for the whole system within the
         # coupled group.
         coupled.add('aero_states',
-                 VLMStates(self.surfaces, self.prob_dict),
+                 VLMStates(self.surfaces, self.prob_dict, t, dt),
                  promotes=['v', 'alpha', 'rho'])
 
         # Explicitly connect parameters from each surface's group and the common

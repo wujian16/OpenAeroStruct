@@ -881,7 +881,6 @@ class SpatialBeamDisp(Component):
                 unknowns['disp_'+str(self.t)][i, :] = disp[j, :]
                 j += 1
 
-
         elem_IDs = self.elem_IDs
         r = params['r']
         disp = unknowns['disp_'+str(self.t)].copy()

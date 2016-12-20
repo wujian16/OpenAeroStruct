@@ -8,7 +8,7 @@ try:
     fortran_flag = True
 except:
     fortran_flag = False
-print 'Fortran = ', fortran_flag
+print 'Fortran =', fortran_flag
 
 from openmdao.api import Component
 
@@ -47,7 +47,6 @@ class TransferDisplacements(Component):
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
         name = surface['name']
-        self.fem_origin = surface['fem_origin']
 
         self.add_param('mesh', val=numpy.zeros((self.nx, self.ny, 3), dtype='complex'))
         self.add_param('disp', val=numpy.zeros((self.ny, 6), dtype='complex'))
@@ -171,7 +170,6 @@ class TransferLoads(Component):
         self.n = self.nx * self.ny
         self.mesh = surface['mesh']
         name = surface['name']
-        self.fem_origin = surface['fem_origin']
 
         self.add_param('def_mesh', val=numpy.zeros((self.nx, self.ny, 3)))
         self.add_param('sec_forces', val=numpy.zeros((self.nx-1, self.ny-1, 3),
@@ -190,14 +188,13 @@ class TransferLoads(Component):
         sec_forces = params['sec_forces']
         sec_forces = numpy.sum(sec_forces, axis=0)
 
-
         w = 0.25
         a_pts = 0.5 * (1-w) * mesh[:-1, :-1, :] + \
                 0.5 *   w   * mesh[1:, :-1, :] + \
                 0.5 * (1-w) * mesh[:-1,  1:, :] + \
                 0.5 *   w   * mesh[1:,  1:, :]
 
-        w = self.fem_origin
+        w = self.surface['fem_origin']
         s_pts = 0.5 * (1-w) * mesh[:-1, :-1, :] + \
                 0.5 *   w   * mesh[1:, :-1, :] + \
                 0.5 * (1-w) * mesh[:-1,  1:, :] + \
