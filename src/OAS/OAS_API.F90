@@ -33,7 +33,7 @@ contains
     real(kind=8), intent(in) :: const_M(2, 2), const_My(4, 4), const_Mz(4, 4), loads(n, 6)
 
     ! Output
-    real(kind=8), intent(out) :: x(6*n), K(6*n, 6*n), M(6*n, 6*n)
+    real(kind=8), intent(out) :: x(6*n+6), K(6*n+6, 6*n+6), M(6*n+6, 6*n+6)
 
     call assemblestructmtx_main(n, tot_n_fem, nodes, A, J, Iy, Iz, &
     K_a, K_t, K_y, K_z, &

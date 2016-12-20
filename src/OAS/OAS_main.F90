@@ -177,17 +177,17 @@ contains
     real(kind=8), intent(in) :: const_M(2, 2), const_My(4, 4), const_Mz(4, 4), loads(n, 6)
 
     ! Output
-    real(kind=8), intent(out) :: x(6*n), K(6*n, 6*n), M(6*n, 6*n)
+    real(kind=8), intent(out) :: x(6*n+6), K(6*n+6, 6*n+6), M(6*n+6, 6*n+6)
 
     ! Working
     real(kind=8) :: P0(3), P1(3), x_loc(3), y_loc(3), z_loc(3), x_cross(3), y_cross(3)
     real(kind=8) :: L, EA_L, GJ_L, EIy_L3, EIz_L3, res(12, 12)
     real(kind=8) :: mat12x12(12, 12), mat12x4(12, 4), mat12x2(12, 2)
     integer ::  num_elems, num_nodes, num_cons, ielem, in0, in1, ind, i
-    real(kind=8) :: Pelem_a_T(12, 2), Pelem_t_T(12, 2), K_(6*n, 6*n), rhs(6*n)
-    real(kind=8) :: Pelem_y_T(12, 4), Pelem_z_T(12, 4), T_elem_T(12, 12), b(6*n)
+    real(kind=8) :: Pelem_a_T(12, 2), Pelem_t_T(12, 2), K_(6*n+6, 6*n+6), rhs(6*n+6)
+    real(kind=8) :: Pelem_y_T(12, 4), Pelem_z_T(12, 4), T_elem_T(12, 12), b(6*n+6)
     real(kind=8) :: mrhoAL, mrhoJL
-    integer :: ipiv(6*n), n_solve
+    integer :: ipiv(6*n+6), n_solve
 
 
     num_elems = n - 1
@@ -344,14 +344,15 @@ contains
     end do
 
     do i = 1, 6
-      K(6*cons+i, :) = 0.
-      M(6*cons+i, :) = 0.
+      K(6*num_nodes+i, 6*cons+i) = 10**9.
+      K(6*cons+i, 6*num_nodes+i) = 10**9.
 
-      K(6*cons+i, 6*cons+i) = 10**8.
-      M(6*cons+i, 6*cons+i) = 1.
+      M(6*num_nodes+i, 6*cons+i) = 1.
+      M(6*cons+i, 6*num_nodes+i) = 1.
+
     end do
 
-    n_solve = 6*n
+    n_solve = 6*n+6
     b = rhs
     K_ = K
 

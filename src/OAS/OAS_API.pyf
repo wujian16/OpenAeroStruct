@@ -42,9 +42,9 @@ python module OAS_API ! in
                 real(kind=8) dimension(4,4),intent(in) :: const_my
                 real(kind=8) dimension(4,4),intent(in) :: const_mz
                 real(kind=8) dimension(n,6),intent(in),depend(n) :: loads
-                real(kind=8) dimension(6 * n,6 * n),intent(out),depend(n,n) :: k
-                real(kind=8) dimension(6 * n,6 * n),intent(out),depend(n,n) :: m
-                real(kind=8) dimension(6 * n),intent(out),depend(n) :: x
+                real(kind=8) dimension(6 * n + 6,6 * n + 6),intent(out),depend(n,n) :: k
+                real(kind=8) dimension(6 * n + 6,6 * n + 6),intent(out),depend(n,n) :: m
+                real(kind=8) dimension(6 * n + 6),intent(out),depend(n) :: x
             end subroutine assemblestructmtx
             subroutine assemblestructmtx_d(n,tot_n_fem,nodes,nodesd,a,ad,j,jd,iy,iyd,iz,izd,k_a,k_t,k_y,k_z,elem_ids,cons,e,g,x_gl,t,k_elem,pelem_a,pelem_t,pelem_y,pelem_z,t_elem,const2,const_y,const_z,loads,loadsd,k,kd,x,xd) ! in :OAS_API:OAS_API.F90:oas_api
                 use oas_main_d, only: assemblestructmtx_main_d
