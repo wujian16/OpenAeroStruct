@@ -96,7 +96,7 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
 
     This creates mtx with blocks corresponding to each lifting surface's
     effects on other lifting surfaces. The block diagonal portions
-    correspond to each lifting surface's influencen on itself. For a single
+    correspond to each lifting surface's influence on itself. For a single
     lifting surface, this is the entire mtx.
 
     Parameters
@@ -335,7 +335,7 @@ def _assemble_AIC_mtx_d(mtx, params, surfaces, skip=False):
 
     This creates mtx with blocks corresponding to each lifting surface's
     effects on other lifting surfaces. The block diagonal portions
-    correspond to each lifting surface's influencen on itself. For a single
+    correspond to each lifting surface's influence on itself. For a single
     lifting surface, this is the entire mtx.
 
     Parameters
@@ -416,7 +416,7 @@ def _assemble_AIC_mtx_d(mtx, params, surfaces, skip=False):
             # Initialize sub-matrix to populate within full mtx
             small_mat = numpy.zeros((n_panels, n_panels_, 3), dtype='complex')
 
-            # Dense fortran assembly for the AIC matrix
+            # Fortran assembly for the AIC matrix
             if fortran_flag:
                 small_mat[:, :, :] = OAS_API.oas_api.assembleaeromtx(alpha, pts, bpts,
                                                          mesh, skip, symmetry)
@@ -478,9 +478,6 @@ class VLMGeometry(Component):
         self.add_output('normals', val=numpy.zeros((nx-1, ny-1, 3)))
         self.add_output('S_ref', val=0.)
 
-    def _get_lengths(self, A, B, axis):
-        return numpy.sqrt(numpy.sum((B - A)**2, axis=axis))
-
     def solve_nonlinear(self, params, unknowns, resids):
         mesh = params['def_mesh']
 
@@ -495,7 +492,7 @@ class VLMGeometry(Component):
                 0.5 * 0.75 * mesh[1:,  1:, :]
 
         # Compute the widths of each panel
-        widths = self._get_lengths(b_pts[:, 1:, :], b_pts[:, :-1, :], 2)
+        widths = numpy.sqrt(numpy.sum((b_pts[:, 1:, :] - b_pts[:, :-1, :])**2, axis=2))
 
         # Compute the normal of each panel by taking the cross-product of
         # its diagonals. Note that this could be a nonplanar surface
@@ -555,13 +552,21 @@ class WakeGeometry(Component):
         self.ny = surface['num_y']
         self.nx = surface['num_x']
 
-        self.add_param('def_mesh', val=numpy.zeros((self.nx, self.ny, 3),
+        self.add_param('b_pts', val=numpy.zeros((self.nx-1, self.ny, 3),
                        dtype="complex"))
-        self.add_output('wake_mesh', val=numpy.zeros((t, self.ny, 3),
+        self.add_output('wake_b_pts', val=numpy.zeros((t, self.ny, 3),
                         dtype="complex"))
 
+        self.t = t
+        self.dt = dt
+
     def solve_nonlinear(self, params, unknowns, resids):
-        mesh = params['def_mesh']
+        b_pts = params['b_pts']
+
+        if self.t == 0:
+            old_wake = b_pts[-1, :, :]
+        # else:
+        #     old_wake = params['old_wake_b_pts']
 
 
     def linearize(self, params, unknowns, resids):
@@ -940,35 +945,6 @@ class VLMLiftDrag(Component):
         if self.surface['symmetry']:
             unknowns['D'] *= 2
             unknowns['L'] *= 2
-
-    def linearize(self, params, unknowns, resids):
-        """ Jacobian for lift and drag."""
-
-        jac = self.alloc_jacobian()
-
-        # Analytic derivatives for sec_forces
-        alpha = params['alpha'] * numpy.pi / 180.
-        cosa = numpy.cos(alpha)
-        sina = numpy.sin(alpha)
-
-        forces = params['sec_forces']
-
-        tmp = numpy.array([-sina, 0, cosa])
-        panel_start = i_panels*3
-        panel_end = i_panels*3+n_panels*3
-        jac['L', 'sec_forces'][i_surf, panel_start:panel_end] = \
-            numpy.atleast_2d(numpy.tile(tmp, n_panels))
-        tmp = numpy.array([cosa, 0, sina])
-        jac['D', 'sec_forces'][i_surf, panel_start:panel_end] = \
-            numpy.atleast_2d(numpy.tile(tmp, n_panels))
-
-        p180 = numpy.pi / 180.
-        jac['L', 'alpha'][i_surf] = p180 * \
-            numpy.sum(-forces[:, :, 0] * cosa - forces[:, :, 2] * sina)
-        jac['D', 'alpha'][i_surf] = p180 * \
-            numpy.sum(-forces[:, :, 0] * sina + forces[:, :, 2] * cosa)
-
-        return jac
 
 
 class VLMCoeffs(Component):

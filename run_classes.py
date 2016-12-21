@@ -22,7 +22,7 @@ from openmdao.devtools.partition_tree_n2 import view_tree
 # =============================================================================
 from geometry import GeometryMesh, Bspline, gen_crm_mesh, gen_rect_mesh
 from transfer import TransferDisplacements, TransferLoads
-from vlm import VLMStates, VLMFunctionals, VLMGeometry
+from vlm import VLMStates, VLMFunctionals, VLMGeometry, WakeGeometry
 from spatialbeam import SpatialBeamStates, SpatialBeamFunctionals, radii, SpatialBeamFEM, SpatialBeamDisp
 from materials import MaterialsTube
 from functionals import FunctionalBreguetRange, FunctionalEquilibrium
@@ -525,6 +525,10 @@ class OASProblem():
                          VLMGeometry(surface, t, dt),
                          promotes=[])
 
+                ts_group.add(name + 'wake',
+                             WakeGeometry(surface, t, dt),
+                             promotes=[])
+
                 # Add a performance group for each surface
                 name = name + 'perf'
                 exec('ts_group.add("' + name + '", ' + 'VLMFunctionals(surface, t, dt)' + ', promotes=["v", "alpha", "M", "Re", "rho"])')
@@ -540,8 +544,10 @@ class OASProblem():
                 # 'aero_states' group.
                 if transient:
                     root.connect(name[:-1] + '.def_mesh', ts_group_name + '.' + name + 'geom.def_mesh')
+                    root.connect(ts_group_name + '.' + name + 'geom.b_pts', ts_group_name + '.' + name + 'wake.b_pts')
                 else:
                     root.connect(name[:-1] + '.def_mesh', name + 'geom.def_mesh')
+
 
                 ts_group.connect(name + 'geom.def_mesh', 'aero_states.' + name + 'def_mesh')
                 ts_group.connect(name + 'geom.b_pts', 'aero_states.' + name + 'b_pts')
