@@ -117,7 +117,7 @@ contains
 
   end subroutine assemblestructmtx_b
 
-  subroutine assembleaeromtx(ny, nx, ny_, nx_, alpha, points, bpts, mesh, skip, symmetry, mtx)
+  subroutine assembleaeromtx(ny, nx, ny_, nx_, alpha, points, bpts, mesh, skip, symmetry, horseshoe, mtx)
 
     implicit none
 
@@ -125,12 +125,12 @@ contains
     integer, intent(in) :: ny, nx, ny_, nx_
     complex(kind=8), intent(in) :: alpha, mesh(nx_, ny_, 3)
     complex(kind=8), intent(in) :: points(nx-1, ny-1, 3), bpts(nx_-1, ny_, 3)
-    logical, intent(in) :: skip, symmetry
+    logical, intent(in) :: skip, symmetry, horseshoe
 
     ! Output
     complex(kind=8), intent(out) :: mtx((nx-1)*(ny-1), (nx_-1)*(ny_-1), 3)
 
-    call assembleaeromtx_main(ny, nx, ny_, nx_, alpha, points, bpts, mesh, skip, symmetry, mtx)
+    call assembleaeromtx_main(ny, nx, ny_, nx_, alpha, points, bpts, mesh, skip, symmetry, horseshoe, mtx)
 
   end subroutine assembleaeromtx
 

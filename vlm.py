@@ -44,6 +44,7 @@ if horseshoe:
     print "Using horseshoes as singularities"
 else:
     print "Using vortex rings as singularities"
+print
 
 def view_mat(mat):
     """ Helper function used to visually examine matrices. """
@@ -146,7 +147,7 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
         nx_ = surface_['num_x']
         ny_ = surface_['num_y']
         n_ = nx_ * ny_
-        n_bpts_ = (nx_ - 1) * ny_
+        n_bpts_ = nx_ * ny_
         n_panels_ = (nx_ - 1) * (ny_ - 1)
 
         # Obtain the lifting surface mesh in the form expected by the solver,
@@ -165,7 +166,7 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
             nx = surface['num_x']
             ny = surface['num_y']
             n = nx * ny
-            n_bpts = (nx - 1) * ny
+            n_bpts = nx * ny
             n_panels = (nx - 1) * (ny - 1)
             symmetry = surface['symmetry']
 
@@ -184,9 +185,9 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
             small_mat = numpy.zeros((n_panels, n_panels_, 3), dtype='complex')
 
             # Dense fortran assembly for the AIC matrix
-            if fortran_flag and horseshoe:
+            if fortran_flag:
                 small_mat[:, :, :] = OAS_API.oas_api.assembleaeromtx(alpha, pts, bpts,
-                                                         mesh, skip, symmetry)
+                                                         mesh, skip, symmetry, horseshoe)
             # Python matrix assembly
             else:
 
@@ -338,8 +339,10 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                             # use the directly aft panel's bound points
                             # for C & D
                             if el_i == nx_ - 2:
-                                C = u * 1.e6 + bpts[el_i, el_j + 1, :]
-                                D = u * 1.e6 + bpts[el_i, el_j + 0, :]
+                                C_long = 1.e6 * u + mesh[-1, el_j + 1, :]
+                                D_long = 1.e6 * u + mesh[-1, el_j + 0, :]
+                                C = 1.e6 * u + mesh[-1, el_j + 1, :]
+                                D = 1.e6 * u + mesh[-1, el_j + 0, :]
                             else:
                                 C = bpts[el_i + 1, el_j + 1, :]
                                 D = bpts[el_i + 1, el_j + 0, :]
@@ -358,11 +361,13 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                                     gamma += _calc_vorticity(B, C, P)
                                     gamma += _calc_vorticity(D, A, P)
 
-                                    # if not (el_loc == cp_loc and skip):
-                                    #     gamma += _calc_vorticity(A, B, P)
                                     if not skip:
                                         gamma += _calc_vorticity(A, B, P)
                                         gamma += _calc_vorticity(C, D, P)
+
+                                    # if el_i == nx_ - 2:
+                                    #     gamma += _calc_vorticity(C, C_long, P)
+                                    #     gamma += _calc_vorticity(D_long, D, P)
 
                                     # If skip, do not include the contributions
                                     # from the panel's bound vortex filament, as
@@ -373,118 +378,6 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                                     # computation, due to the different collocation
                                     # points.
                                     small_mat[cp_loc, el_loc, :] = gamma
-
-            # Populate the full-size matrix with these surface-surface AICs
-            mtx[i_panels:i_panels+n_panels,
-                i_panels_:i_panels_+n_panels_, :] = small_mat
-
-            i += n
-            i_bpts += n_bpts
-            i_panels += n_panels
-
-        i_ += n_
-        i_bpts_ += n_bpts_
-        i_panels_ += n_panels_
-
-    mtx /= 4 * numpy.pi
-
-def _assemble_AIC_mtx_d(mtx, params, surfaces, skip=False):
-    """
-    Compute the aerodynamic influence coefficient matrix
-    for either solving the linear system or solving for the drag.
-
-    We use a nested for loop structure to loop through the lifting surfaces to
-    obtain the corresponding mesh, then for each mesh we again loop through
-    the lifting surfaces to obtain the collocation points used to compute
-    the horseshoe vortex influence coefficients.
-
-    This creates mtx with blocks corresponding to each lifting surface's
-    effects on other lifting surfaces. The block diagonal portions
-    correspond to each lifting surface's influence on itself. For a single
-    lifting surface, this is the entire mtx.
-
-    Parameters
-    ----------
-    mtx[num_y-1, num_y-1, 3] : array_like
-        Aerodynamic influence coefficient (AIC) matrix, or the
-        derivative of v w.r.t. circulations.
-    params : dictionary
-        OpenMDAO params dictionary for a given aero problem
-    surfaces : dictionary
-        Dictionary containing all surfaces in an aero problem.
-    skip : boolean
-        If false, the bound vortex contributions on the collocation point
-        corresponding to the same panel are not included. Used for the drag
-        computation.
-
-    Returns
-    -------
-    mtx[tot_panels, tot_panels, 3] : array_like
-        Aerodynamic influence coefficient (AIC) matrix, or the
-        derivative of v w.r.t. circulations.
-    """
-
-    alpha = params['alpha']
-    mtx[:, :, :] = 0.0
-    cosa = numpy.cos(alpha * numpy.pi / 180.)
-    sina = numpy.sin(alpha * numpy.pi / 180.)
-    u = numpy.array([cosa, 0, sina])
-
-    i_ = 0
-    i_bpts_ = 0
-    i_panels_ = 0
-
-    # Loop over the lifting surfaces to compute their influence on the flow
-    # velocity at the collocation points
-    for surface_ in surfaces:
-
-        # Variable names with a trailing underscore correspond to the lifting
-        # surface being examined, not the collocation point
-        name_ = surface_['name']
-        nx_ = surface_['num_x']
-        ny_ = surface_['num_y']
-        n_ = nx_ * ny_
-        n_bpts_ = (nx_ - 1) * ny_
-        n_panels_ = (nx_ - 1) * (ny_ - 1)
-
-        # Obtain the lifting surface mesh in the form expected by the solver,
-        # with shape [nx_, ny_, 3]
-        mesh = params['def_mesh']
-        bpts = params['b_pts']
-
-        # Set counters to know where to index the sub-matrix within the full mtx
-        i = 0
-        i_bpts = 0
-        i_panels = 0
-
-        for surface in surfaces:
-            # These variables correspond to the collocation points
-            name = surface['name']
-            nx = surface['num_x']
-            ny = surface['num_y']
-            n = nx * ny
-            n_bpts = (nx - 1) * ny
-            n_panels = (nx - 1) * (ny - 1)
-            symmetry = surface['symmetry']
-
-            # Obtain the collocation points used to compute the AIC mtx.
-            # If setting up the AIC mtx, we use the collocation points (c_pts),
-            # but if setting up the matrix to solve for drag, we use the
-            # midpoints of the bound vortices.
-            if skip:
-                # Find the midpoints of the bound points, used in drag computations
-                pts = (params['b_pts'][:, 1:, :] + \
-                    params['b_pts'][:, :-1, :]) / 2
-            else:
-                pts = params['c_pts']
-
-            # Initialize sub-matrix to populate within full mtx
-            small_mat = numpy.zeros((n_panels, n_panels_, 3), dtype='complex')
-
-            # Fortran assembly for the AIC matrix
-            if fortran_flag:
-                small_mat[:, :, :] = OAS_API.oas_api.assembleaeromtx(alpha, pts, bpts,
-                                                         mesh, skip, symmetry)
 
             # Populate the full-size matrix with these surface-surface AICs
             mtx[i_panels:i_panels+n_panels,
@@ -546,8 +439,14 @@ class VLMGeometry(Component):
     def solve_nonlinear(self, params, unknowns, resids):
         mesh = params['def_mesh']
 
+        b_pts = unknowns['b_pts']
+
         # Compute the bound points at 1/4 chord
         b_pts = mesh[:-1, :, :] * .75 + mesh[1:, :, :] * .25
+
+        # Populate the last row of b_pts with the extrapolated mesh
+        # May need to incorporate the timestep and velocity here like Gio
+        # b_pts[-1, :, :] = .25 * (mesh[-1, :, :] - mesh[-2, :, :]) + mesh[-1, :, :]
 
         # Compute the collocation points at the midpoints of each
         # panel's 3/4 chord line
@@ -586,22 +485,9 @@ class VLMGeometry(Component):
         fd_jac = self.complex_step_jacobian(params, unknowns, resids,
                                             fd_params=['def_mesh'],
                                             fd_unknowns=['widths', 'normals',
-                                                         'S_ref'],
+                                                         'S_ref', 'b_pts', 'c_pts'],
                                             fd_states=[])
         jac.update(fd_jac)
-
-        nx = self.surface['num_x']
-        ny = self.surface['num_y']
-
-        for iz, v in zip((0, ny*3), (.75, .25)):
-            numpy.fill_diagonal(jac['b_pts', 'def_mesh'][:, iz:], v)
-
-
-        for iz, v in zip((0, 3, ny*3, (ny+1)*3),
-                         (.125, .125, .375, .375)):
-            for ix in range(nx-1):
-                numpy.fill_diagonal(jac['c_pts', 'def_mesh']
-                    [(ix*(ny-1))*3:((ix+1)*(ny-1))*3, iz+ix*ny*3:], v)
 
         return jac
 

@@ -422,7 +422,7 @@ contains
 
   end subroutine
 
-  subroutine assembleaeromtx_main(ny, nx, ny_, nx_, alpha, points, bpts, mesh, skip, symmetry, mtx)
+  subroutine assembleaeromtx_main(ny, nx, ny_, nx_, alpha, points, bpts, mesh, skip, symmetry, horseshoe, mtx)
 
     implicit none
 
@@ -430,7 +430,7 @@ contains
     integer, intent(in) :: ny, nx, ny_, nx_
     complex(kind=8), intent(in) :: alpha, mesh(nx_, ny_, 3)
     complex(kind=8), intent(in) :: points(nx-1, ny-1, 3), bpts(nx_-1, ny_, 3)
-    logical, intent(in) :: skip, symmetry
+    logical, intent(in) :: skip, symmetry, horseshoe
 
     ! Output
     complex(kind=8), intent(out) :: mtx((nx-1)*(ny-1), (nx_-1)*(ny_-1), 3)
@@ -452,106 +452,154 @@ contains
 
     mtx(:, :, :) = 0.
 
-    do el_j = 1, ny_-1 ! spanwise loop through horseshoe elements
-      el_loc_j = (el_j - 1) * (nx_ - 1)
-      C_te = mesh(nx_, el_j + 1, :)
-      D_te = mesh(nx_, el_j + 0, :)
+    if (horseshoe) then
 
-      if (symmetry) then
-        C_te_sym = C_te
-        D_te_sym = D_te
-        C_te_sym(2) = -C_te_sym(2)
-        D_te_sym(2) = -D_te_sym(2)
-      end if
+      do el_j = 1, ny_-1 ! spanwise loop through horseshoe elements
+        el_loc_j = (el_j - 1) * (nx_ - 1)
+        C_te = mesh(nx_, el_j + 1, :)
+        D_te = mesh(nx_, el_j + 0, :)
 
-      do cp_j = 1, ny-1 ! spanwise loop through control points
-        cp_loc_j = (cp_j - 1) * (nx - 1)
+        if (symmetry) then
+          C_te_sym = C_te
+          D_te_sym = D_te
+          C_te_sym(2) = -C_te_sym(2)
+          D_te_sym(2) = -D_te_sym(2)
+        end if
 
-        do cp_i = 1, nx-1 ! chordwise loop through control points
-          cp_loc = cp_i + cp_loc_j
-          P = points(cp_i, cp_j, :)
+        do cp_j = 1, ny-1 ! spanwise loop through control points
+          cp_loc_j = (cp_j - 1) * (nx - 1)
 
-          r1 = P - D_te
-          r2 = P - C_te
-          call normc(r1, r1_mag)
-          call normc(r2, r2_mag)
+          do cp_i = 1, nx-1 ! chordwise loop through control points
+            cp_loc = cp_i + cp_loc_j
+            P = points(cp_i, cp_j, :)
 
-          call crossc(u, r2, ur2)
-          call crossc(u, r1, ur1)
-
-          edges(:) = 0.
-          call dotc(u, r2, dot_ur2)
-          call dotc(u, r1, dot_ur1)
-          edges = ur2 / (r2_mag * (r2_mag - dot_ur2))
-          edges = edges - ur1 / (r1_mag * (r1_mag - dot_ur1))
-
-          if (symmetry) then
-            r1 = P - D_te_sym
-            r2 = P - C_te_sym
+            r1 = P - D_te
+            r2 = P - C_te
             call normc(r1, r1_mag)
             call normc(r2, r2_mag)
 
             call crossc(u, r2, ur2)
             call crossc(u, r1, ur1)
 
+            edges(:) = 0.
             call dotc(u, r2, dot_ur2)
             call dotc(u, r1, dot_ur1)
-
-            edges = edges - ur2 / (r2_mag * (r2_mag - dot_ur2))
-            edges = edges + ur1 / (r1_mag * (r1_mag - dot_ur1))
-          end if
-
-          do el_i = nx_-1, 1, -1 ! chordwise loop through horseshoe elements
-            el_loc = el_i + el_loc_j
-
-            A = bpts(el_i + 0, el_j + 0, :)
-            B = bpts(el_i + 0, el_j + 1, :)
-
-            if (el_i .EQ. nx_ - 1) then
-              C = C_te
-              D = D_te
-            else
-              C = bpts(el_i + 1, el_j + 1, :)
-              D = bpts(el_i + 1, el_j + 0, :)
-            end if
-
-            call calc_vorticity(B, C, P, edges)
-            call calc_vorticity(D, A, P, edges)
+            edges = ur2 / (r2_mag * (r2_mag - dot_ur2))
+            edges = edges - ur1 / (r1_mag * (r1_mag - dot_ur1))
 
             if (symmetry) then
-              A_sym = A
-              B_sym = B
-              C_sym = C
-              D_sym = D
-              A_sym(2) = -A_sym(2)
-              B_sym(2) = -B_sym(2)
-              C_sym(2) = -C_sym(2)
-              D_sym(2) = -D_sym(2)
+              r1 = P - D_te_sym
+              r2 = P - C_te_sym
+              call normc(r1, r1_mag)
+              call normc(r2, r2_mag)
 
-              call calc_vorticity(C_sym, B_sym, P, edges)
-              call calc_vorticity(A_sym, D_sym, P, edges)
+              call crossc(u, r2, ur2)
+              call crossc(u, r1, ur1)
+
+              call dotc(u, r2, dot_ur2)
+              call dotc(u, r1, dot_ur1)
+
+              edges = edges - ur2 / (r2_mag * (r2_mag - dot_ur2))
+              edges = edges + ur1 / (r1_mag * (r1_mag - dot_ur1))
             end if
 
-            if ((skip)  .and. (cp_loc .EQ. el_loc)) then
-              bound(:) = 0.
-              if (symmetry) then
-                call calc_vorticity(B_sym, A_sym, P, bound)
-              end if
-              mtx(cp_loc, el_loc, :) = edges + bound
-            else
-              bound(:) = 0.
-              call calc_vorticity(A, B, P, bound)
-              if (symmetry) then
-                call calc_vorticity(B_sym, A_sym, P, bound)
-              end if
-              mtx(cp_loc, el_loc, :) = edges + bound
-            end if
+            do el_i = nx_-1, 1, -1 ! chordwise loop through horseshoe elements
+              el_loc = el_i + el_loc_j
 
+              A = bpts(el_i + 0, el_j + 0, :)
+              B = bpts(el_i + 0, el_j + 1, :)
+
+              if (el_i .EQ. nx_ - 1) then
+                C = C_te
+                D = D_te
+              else
+                C = bpts(el_i + 1, el_j + 1, :)
+                D = bpts(el_i + 1, el_j + 0, :)
+              end if
+
+              call calc_vorticity(B, C, P, edges)
+              call calc_vorticity(D, A, P, edges)
+
+              if (symmetry) then
+                A_sym = A
+                B_sym = B
+                C_sym = C
+                D_sym = D
+                A_sym(2) = -A_sym(2)
+                B_sym(2) = -B_sym(2)
+                C_sym(2) = -C_sym(2)
+                D_sym(2) = -D_sym(2)
+
+                call calc_vorticity(C_sym, B_sym, P, edges)
+                call calc_vorticity(A_sym, D_sym, P, edges)
+              end if
+
+              if ((skip)  .and. (cp_loc .EQ. el_loc)) then
+                bound(:) = 0.
+                if (symmetry) then
+                  call calc_vorticity(B_sym, A_sym, P, bound)
+                end if
+                mtx(cp_loc, el_loc, :) = edges + bound
+              else
+                bound(:) = 0.
+                call calc_vorticity(A, B, P, bound)
+                if (symmetry) then
+                  call calc_vorticity(B_sym, A_sym, P, bound)
+                end if
+                mtx(cp_loc, el_loc, :) = edges + bound
+              end if
+
+            end do
+          end do
+
+         end do
+      end do
+
+    else
+
+      do el_j = 1, ny_-1 ! spanwise loop through horseshoe elements
+        el_loc_j = (el_j - 1) * (nx_ - 1)
+
+        do el_i = 1, nx_-1 ! chordwise loop through horseshoe elements
+          el_loc = el_i + el_loc_j
+
+          A = bpts(el_i + 0, el_j + 0, :)
+          B = bpts(el_i + 0, el_j + 1, :)
+
+          if (el_i .EQ. nx_ - 1) then
+            C = u * 1.e6 + bpts(el_i, el_j + 1, :)
+            D = u * 1.e6 + bpts(el_i, el_j + 0, :)
+          else
+            C = bpts(el_i + 1, el_j + 1, :)
+            D = bpts(el_i + 1, el_j + 0, :)
+          end if
+
+          do cp_j = 1, ny-1 ! spanwise loop through control points
+            cp_loc_j = (cp_j - 1) * (nx - 1)
+
+            do cp_i = 1, nx-1 ! chordwise loop through control points
+              cp_loc = cp_i + cp_loc_j
+
+              P = points(cp_i, cp_j, :)
+
+              bound(:) = 0.
+
+              call calc_vorticity(B, C, P, bound)
+              call calc_vorticity(D, A, P, bound)
+
+              if (.not. skip) then
+                call calc_vorticity(A, B, P, bound)
+                call calc_vorticity(C, D, P, bound)
+              end if
+
+              mtx(cp_loc, el_loc, :) = bound
+
+            end do
           end do
         end do
+      end do
 
-       end do
-    end do
+    end if
 
   end subroutine assembleaeromtx_main
 

@@ -126,7 +126,7 @@ python module OAS_API ! in
                 real(kind=8) dimension(6 * n + 6),intent(in),depend(n) :: x
                 real(kind=8) dimension(6 * n + 6),intent(in),depend(n) :: xb
             end subroutine assemblestructmtx_b
-            subroutine assembleaeromtx(ny,nx,ny_,nx_,alpha,points,bpts,mesh,skip,symmetry,mtx) ! in :OAS_API:OAS_API.F90:oas_api
+            subroutine assembleaeromtx(ny,nx,ny_,nx_,alpha,points,bpts,mesh,skip,symmetry,horseshoe,mtx) ! in :OAS_API:OAS_API.F90:oas_api
                 integer, optional,intent(in),check((shape(points,1)+1)==ny),depend(points) :: ny=(shape(points,1)+1)
                 integer, optional,intent(in),check((shape(points,0)+1)==nx),depend(points) :: nx=(shape(points,0)+1)
                 integer, optional,intent(in),check(shape(bpts,1)==ny_),depend(bpts) :: ny_=shape(bpts,1)
@@ -137,6 +137,7 @@ python module OAS_API ! in
                 complex(kind=8) dimension(nx_,ny_,3),intent(in),depend(nx_,ny_) :: mesh
                 logical intent(in) :: skip
                 logical intent(in) :: symmetry
+                logical intent(in) :: horseshoe
                 complex(kind=8) dimension((nx-1)*(ny-1),(nx_-1)*(ny_-1),3),intent(out),depend(ny,nx,ny_,nx_) :: mtx
             end subroutine assembleaeromtx
             subroutine calc_vonmises(elem_ids,nodes,r,disp,e,g,x_gl,num_elems,n,vonmises) ! in :OAS_API:OAS_API.F90:oas_api

@@ -31,8 +31,9 @@ if __name__ == "__main__":
     # Instantiate problem and add default surface
     OAS_prob = OASProblem(prob_dict)
     OAS_prob.add_surface({'name' : 'wing',
+                        #   'wing_type' : 'CRM',
                           'symmetry' : False,
-                          'num_y' : 5,
+                          'num_y' : 9,
                           'num_x' : 3,
                           'span_cos_spacing' : 0.})
 
