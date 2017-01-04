@@ -38,12 +38,10 @@ try:
     fortran_flag = True
 except:
     fortran_flag = False
+fortran_flag = False
 
 horseshoe = False
-if horseshoe:
-    print "Using horseshoes as singularities"
-else:
-    print "Using vortex rings as singularities"
+print "Horseshoes =", horseshoe
 print
 
 def view_mat(mat):
@@ -176,8 +174,8 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
             # midpoints of the bound vortices.
             if skip:
                 # Find the midpoints of the bound points, used in drag computations
-                pts = (params[name+'b_pts'][:, 1:, :] + \
-                    params[name+'b_pts'][:, :-1, :]) / 2
+                pts = (params[name+'b_pts'][:-1, 1:, :] + \
+                    params[name+'b_pts'][:-1, :-1, :]) / 2
             else:
                 pts = params[name+'c_pts']
 
@@ -318,8 +316,8 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                                         small_mat[cp_loc, el_loc, :] = \
                                             trailing + edges + bound
 
-                else:
-                    # Spanwise loop through horseshoe elements
+                else: #   VORTEX RINGS
+                    # Spanwise loop through vortex rings
                     for el_j in xrange(ny_ - 1):
                         el_loc_j = el_j * (nx_ - 1)
 
@@ -339,10 +337,10 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                             # use the directly aft panel's bound points
                             # for C & D
                             if el_i == nx_ - 2:
-                                C_long = 1.e6 * u + mesh[-1, el_j + 1, :]
-                                D_long = 1.e6 * u + mesh[-1, el_j + 0, :]
-                                C = 1.e6 * u + mesh[-1, el_j + 1, :]
-                                D = 1.e6 * u + mesh[-1, el_j + 0, :]
+                                C = bpts[el_i + 1, el_j + 1, :]
+                                D = bpts[el_i + 1, el_j + 0, :]
+                                C_far = 1.e6 * u + C
+                                D_far = 1.e6 * u + D
                             else:
                                 C = bpts[el_i + 1, el_j + 1, :]
                                 D = bpts[el_i + 1, el_j + 0, :]
@@ -365,9 +363,12 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                                         gamma += _calc_vorticity(A, B, P)
                                         gamma += _calc_vorticity(C, D, P)
 
-                                    # if el_i == nx_ - 2:
-                                    #     gamma += _calc_vorticity(C, C_long, P)
-                                    #     gamma += _calc_vorticity(D_long, D, P)
+                                    if el_i == nx_ - 2:
+                                        gamma += _calc_vorticity(C, C_far, P)
+                                        gamma += _calc_vorticity(D_far, D, P)
+
+                                        if not skip:
+                                            gamma -= _calc_vorticity(C, D, P)
 
                                     # If skip, do not include the contributions
                                     # from the panel's bound vortex filament, as
@@ -404,7 +405,7 @@ class VLMGeometry(Component):
 
     Returns
     -------
-    b_pts[nx-1, ny, 3] : array_like
+    b_pts[nx, ny, 3] : array_like
         Bound points for the horseshoe vortices, found along the 1/4 chord.
     c_pts[nx-1, ny-1, 3] : array_like
         Collocation points on the 3/4 chord line where the flow tangency
@@ -429,7 +430,7 @@ class VLMGeometry(Component):
 
         self.add_param('def_mesh', val=numpy.zeros((nx, ny, 3),
                        dtype="complex"))
-        self.add_output('b_pts', val=numpy.zeros((nx-1, ny, 3),
+        self.add_output('b_pts', val=numpy.zeros((nx, ny, 3),
                         dtype="complex"))
         self.add_output('c_pts', val=numpy.zeros((nx-1, ny-1, 3)))
         self.add_output('widths', val=numpy.zeros((nx-1, ny-1)))
@@ -442,11 +443,11 @@ class VLMGeometry(Component):
         b_pts = unknowns['b_pts']
 
         # Compute the bound points at 1/4 chord
-        b_pts = mesh[:-1, :, :] * .75 + mesh[1:, :, :] * .25
+        b_pts[:-1, :, :] = mesh[:-1, :, :] * .75 + mesh[1:, :, :] * .25
 
         # Populate the last row of b_pts with the extrapolated mesh
         # May need to incorporate the timestep and velocity here like Gio
-        # b_pts[-1, :, :] = .25 * (mesh[-1, :, :] - mesh[-2, :, :]) + mesh[-1, :, :]
+        b_pts[-1, :, :] = .25 * (mesh[-1, :, :] - mesh[-2, :, :]) + mesh[-1, :, :]
 
         # Compute the collocation points at the midpoints of each
         # panel's 3/4 chord line
@@ -456,7 +457,7 @@ class VLMGeometry(Component):
                 0.5 * 0.75 * mesh[1:,  1:, :]
 
         # Compute the widths of each panel
-        widths = numpy.sqrt(numpy.sum((b_pts[:, 1:, :] - b_pts[:, :-1, :])**2, axis=2))
+        widths = numpy.sqrt(numpy.sum((b_pts[:-1, 1:, :] - b_pts[:-1, :-1, :])**2, axis=2))
 
         # Compute the normal of each panel by taking the cross-product of
         # its diagonals. Note that this could be a nonplanar surface
@@ -503,7 +504,7 @@ class WakeGeometry(Component):
         self.ny = surface['num_y']
         self.nx = surface['num_x']
 
-        self.add_param('b_pts', val=numpy.zeros((self.nx-1, self.ny, 3),
+        self.add_param('b_pts', val=numpy.zeros((self.nx, self.ny, 3),
                        dtype="complex"))
         self.add_output('wake_b_pts', val=numpy.zeros((t, self.ny, 3),
                         dtype="complex"))
@@ -520,10 +521,6 @@ class WakeGeometry(Component):
         #     old_wake = params['old_wake_b_pts']
 
 
-    def linearize(self, params, unknowns, resids):
-        """ Jacobian for wake geometry."""
-
-
 class VLMCirculations(Component):
     """
     Compute the circulations based on the AIC matrix and the panel velocities.
@@ -533,7 +530,7 @@ class VLMCirculations(Component):
     ----------
     def_mesh[nx, ny, 3] : array_like
         Array defining the nodal coordinates of the lifting surface.
-    b_pts[nx-1, ny, 3] : array_like
+    b_pts[nx, ny, 3] : array_like
         Bound points for the horseshoe vortices, found along the 1/4 chord.
     c_pts[nx-1, ny-1, 3] : array_like
         Collocation points on the 3/4 chord line where the flow tangency
@@ -568,7 +565,7 @@ class VLMCirculations(Component):
 
             self.add_param(name+'def_mesh', val=numpy.zeros((nx, ny, 3),
                            dtype="complex"))
-            self.add_param(name+'b_pts', val=numpy.zeros((nx-1, ny, 3),
+            self.add_param(name+'b_pts', val=numpy.zeros((nx, ny, 3),
                            dtype="complex"))
             self.add_param(name+'c_pts', val=numpy.zeros((nx-1, ny-1, 3),
                            dtype="complex"))
@@ -691,7 +688,7 @@ class VLMForces(Component):
     ----------
     def_mesh[nx, ny, 3] : array_like
         Array defining the nodal coordinates of the lifting surface.
-    b_pts[nx-1, ny, 3] : array_like
+    b_pts[nx, ny, 3] : array_like
         Bound points for the horseshoe vortices, found along the 1/4 chord.
     circulations : array_like
         Flattened vector of horseshoe vortex strengths calculated by solving
@@ -724,7 +721,7 @@ class VLMForces(Component):
             nx = surface['num_x']
 
             self.add_param(name+'def_mesh', val=numpy.zeros((nx, ny, 3), dtype='complex'))
-            self.add_param(name+'b_pts', val=numpy.zeros((nx-1, ny, 3), dtype='complex'))
+            self.add_param(name+'b_pts', val=numpy.zeros((nx, ny, 3), dtype='complex'))
             self.add_output(name+'sec_forces', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
 
         self.tot_panels = tot_panels
@@ -770,7 +767,7 @@ class VLMForces(Component):
 
             b_pts = params[name+'b_pts']
 
-            bound = b_pts[:, 1:, :] - b_pts[:, :-1, :]
+            bound = b_pts[:-1, 1:, :] - b_pts[:-1, :-1, :]
 
             # Cross the obtained velocities with the bound vortex filament
             # vectors
@@ -976,6 +973,7 @@ class VLMCoeffs(Component):
         unknowns['CL'] = L / (0.5 * rho * v**2 * S_ref) + self.surface['CL0']
         unknowns['CD'] = D / (0.5 * rho * v**2 * S_ref) + self.surface['CD0']
 
+
 class VLMStates(Group):
     """ Group that contains the aerodynamic states. """
 
@@ -988,6 +986,7 @@ class VLMStates(Group):
         self.add('forces',
                  VLMForces(surfaces, prob_dict),
                  promotes=['*'])
+
 
 class VLMFunctionals(Group):
     """ Group that contains the aerodynamic functionals used to evaluate

@@ -34,7 +34,7 @@ if __name__ == "__main__":
                         #   'wing_type' : 'CRM',
                           'symmetry' : False,
                           'num_y' : 9,
-                          'num_x' : 3,
+                          'num_x' : 2,
                           'span_cos_spacing' : 0.})
 
     # Single lifting surface
