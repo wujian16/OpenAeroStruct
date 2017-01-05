@@ -553,6 +553,7 @@ class OASProblem():
                 ts_group.connect(name + 'geom.b_pts', 'aero_states.' + name + 'b_pts')
                 ts_group.connect(name + 'geom.c_pts', 'aero_states.' + name + 'c_pts')
                 ts_group.connect(name + 'geom.normals', 'aero_states.' + name + 'normals')
+                ts_group.connect(name + 'geom.widths', 'aero_states.' + name + 'widths')
 
                 # Connect the results from 'aero_states' to the performance groups
                 ts_group.connect('aero_states.' + name + 'sec_forces', name + 'perf.sec_forces')

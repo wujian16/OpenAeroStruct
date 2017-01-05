@@ -149,7 +149,13 @@ class Display(object):
                         self.obj_key = item
 
         for case_name, case_data in self.db.iteritems():
-            if "metadata" in case_name or "derivs" in case_name or "Driver" in case_name:
+            # Only continue for these cases if there are more than one iteration
+            # which occurs when we run an optimization case.
+            if len(self.db.keys()) > 2:
+                if "derivs" in case_name or "Driver" in case_name:
+                    continue  # don't plot these cases
+
+            if "metadata" in case_name:
                 continue  # don't plot these cases
 
             names = []
@@ -163,7 +169,10 @@ class Display(object):
 
             self.names = names
             n_names = len(names)
-            self.obj.append(case_data['Unknowns'][self.obj_key])
+            try:
+                self.obj.append(case_data['Unknowns'][self.obj_key])
+            except AttributeError:
+                pass
 
             # Loop through each of the surfaces
             for name in names:
@@ -188,11 +197,11 @@ class Display(object):
                     try:
                         self.def_mesh.append(case_data['Unknowns'][name+'.def_mesh'])
                         self.twist.append(case_data['Unknowns'][name+'.twist'])
-                        normals.append(case_data['Unknowns'][name+'.normals'])
-                        widths.append(case_data['Unknowns'][name+'.widths'])
+                        normals.append(case_data['Unknowns'][name+'_geom.normals'])
+                        widths.append(case_data['Unknowns'][name+'_geom.widths'])
                         sec_forces.append(case_data['Unknowns']['aero_states.' + name + '_sec_forces'])
-                        self.CL.append(case_data['Unknowns'][name+'_perf.CL1'])
-                        self.S_ref.append(case_data['Unknowns'][name+'.S_ref'])
+                        self.CL.append(case_data['Unknowns'][name+'_perf.CL'])
+                        self.S_ref.append(case_data['Unknowns'][name+'_geom.S_ref'])
                         self.show_wing = True
                     except:
                         self.show_wing = False
@@ -219,7 +228,7 @@ class Display(object):
                 rho.append(case_data['Unknowns']['rho'])
                 v.append(case_data['Unknowns']['v'])
 
-        self.num_iters = numpy.max([int(len(self.mesh) / n_names) - 1, 1])
+        self.num_iters = numpy.max([int(len(self.mesh) / n_names) - 1, 0])
 
         symm_count = 0
         for mesh in self.mesh:
@@ -499,14 +508,18 @@ class Display(object):
         self.ax.auto_scale_xyz([-lim, lim], [-lim, lim], [-lim, lim])
         self.ax.set_title("Major Iteration: {}".format(self.curr_pos))
 
-        round_to_n = lambda x, n: round(x, -int(numpy.floor(numpy.log10(abs(x)))) + (n - 1))
-        obj_val = round_to_n(self.obj[self.curr_pos], 7)
-        self.ax.text2D(.55, .05, self.obj_key + ': {}'.format(obj_val),
-            transform=self.ax.transAxes, color='k')
+        try:
+            round_to_n = lambda x, n: round(x, -int(numpy.floor(numpy.log10(abs(x)))) + (n - 1))
+            obj_val = round_to_n(self.obj[self.curr_pos], 7)
+            self.ax.text2D(.55, .05, self.obj_key + ': {}'.format(obj_val),
+                transform=self.ax.transAxes, color='k')
+        except IndexError:
+            pass
 
-        freq_val = round_to_n(numpy.min(self.freqs[self.curr_pos])/(2*numpy.pi), 3)
-        self.ax.text2D(.55, .0, 'lowest freq: {} Hz'.format(freq_val),
-            transform=self.ax.transAxes, color='k')
+        # TODO: fix this here only for dynamic structural analysis
+        # freq_val = round_to_n(numpy.min(self.freqs[self.curr_pos])/(2*numpy.pi), 3)
+        # self.ax.text2D(.55, .0, 'lowest freq: {} Hz'.format(freq_val),
+        #     transform=self.ax.transAxes, color='k')
 
         self.ax.view_init(elev=el, azim=az)  # Reproduce view
         self.ax.dist = dist

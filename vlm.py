@@ -40,7 +40,7 @@ except:
     fortran_flag = False
 fortran_flag = False
 
-horseshoe = False
+horseshoe = True
 print "Horseshoes =", horseshoe
 print
 
@@ -130,6 +130,7 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
     cosa = numpy.cos(alpha * numpy.pi / 180.)
     sina = numpy.sin(alpha * numpy.pi / 180.)
     u = numpy.array([cosa, 0, sina])
+    u = numpy.array([1., 0, 0.])
 
     i_ = 0
     i_bpts_ = 0
@@ -303,8 +304,6 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                                             bound = _calc_vorticity(B_sym, A_sym, P)
                                         else:
                                             bound = numpy.zeros((3))
-                                        small_mat[cp_loc, el_loc, :] = \
-                                            trailing + edges + bound
                                     else:
                                         bound = _calc_vorticity(A, B, P)
 
@@ -313,8 +312,9 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                                         if symmetry:
                                             bound += _calc_vorticity(B_sym, A_sym, P)
 
-                                        small_mat[cp_loc, el_loc, :] = \
-                                            trailing + edges + bound
+                                    small_mat[cp_loc, el_loc, :] = \
+                                        trailing + edges + bound
+                                    # print el_loc, cp_loc, small_mat[cp_loc, el_loc, :].real/(4*numpy.pi)
 
                 else: #   VORTEX RINGS
                     # Spanwise loop through vortex rings
@@ -361,14 +361,25 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
 
                                     if not skip:
                                         gamma += _calc_vorticity(A, B, P)
-                                        gamma += _calc_vorticity(C, D, P)
+
+                                        if el_i < nx_ - 2:
+                                            gamma += _calc_vorticity(C, D, P)
+
+                                    else:
+                                        if el_loc == cp_loc:
+                                            pass
+                                        else:
+                                            gamma += _calc_vorticity(A, B, P)
+
+                                        if el_i + 1 == cp_i and el_j == cp_j:
+                                            pass
+                                        else:
+                                            if el_i < nx_-2:
+                                                gamma += _calc_vorticity(C, D, P)
 
                                     if el_i == nx_ - 2:
                                         gamma += _calc_vorticity(C, C_far, P)
                                         gamma += _calc_vorticity(D_far, D, P)
-
-                                        if not skip:
-                                            gamma -= _calc_vorticity(C, D, P)
 
                                     # If skip, do not include the contributions
                                     # from the panel's bound vortex filament, as
@@ -722,6 +733,7 @@ class VLMForces(Component):
 
             self.add_param(name+'def_mesh', val=numpy.zeros((nx, ny, 3), dtype='complex'))
             self.add_param(name+'b_pts', val=numpy.zeros((nx, ny, 3), dtype='complex'))
+            self.add_param(name+'widths', val=numpy.zeros((nx-1, ny-1), dtype='complex'))
             self.add_output(name+'sec_forces', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
 
         self.tot_panels = tot_panels
@@ -782,6 +794,8 @@ class VLMForces(Component):
                     sec_forces[:, ind] = circ[i:i+num_panels] * cross[:, ind]
                 unknowns[name+'sec_forces'] = params['rho'] * sec_forces.reshape((nx-1, ny-1, 3), order='F')
 
+                lift = drag = unknowns[name+'sec_forces']
+
             else:
                 circ_slice = circ[i:i+num_panels].reshape(nx-1, ny-1, order='F')
                 cross_slice = cross.reshape(nx-1, ny-1, 3, order='F')
@@ -792,6 +806,7 @@ class VLMForces(Component):
                     for j in xrange(1, nx - 1):
                         sec_forces[j*(ny-1):(j+1)*(ny-1), ind] = \
                             (circ_slice[j, :] - circ_slice[j-1, :]) * cross_slice[j, :, ind]
+
 
                 unknowns[name+'sec_forces'] = params['rho'] * sec_forces.reshape((nx-1, ny-1, 3), order='C')
 
