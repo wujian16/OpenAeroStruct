@@ -38,9 +38,8 @@ try:
     fortran_flag = True
 except:
     fortran_flag = False
-fortran_flag = False
 
-horseshoe = True
+horseshoe = False
 print "Horseshoes =", horseshoe
 print
 
@@ -89,7 +88,7 @@ def _calc_vorticity(A, B, P):
            (r1_mag * r2_mag * (r1_mag * r2_mag + r1.dot(r2)))
 
 
-def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
+def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
     """
     Compute the aerodynamic influence coefficient matrix
     for either solving the linear system or solving for the drag.
@@ -143,16 +142,23 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
         # Variable names with a trailing underscore correspond to the lifting
         # surface being examined, not the collocation point
         name_ = surface_['name']
-        nx_ = surface_['num_x']
-        ny_ = surface_['num_y']
-        n_ = nx_ * ny_
-        n_bpts_ = nx_ * ny_
-        n_panels_ = (nx_ - 1) * (ny_ - 1)
 
         # Obtain the lifting surface mesh in the form expected by the solver,
         # with shape [nx_, ny_, 3]
         mesh = params[name_+'def_mesh']
-        bpts = params[name_+'b_pts']
+        if wake:
+            bpts = params[name_+'wake_b_pts']
+        else:
+            bpts = params[name_+'b_pts']
+
+        # The shape of the bpts array will change for each timestep if we
+        # have a transient case. If we have a steady-state case, nx_ and ny_
+        # are equal to the values for num_x and num_y in the surface dict.
+        nx_, ny_ = bpts.shape[:2]
+
+        n_ = nx_ * ny_
+        n_bpts_ = nx_ * ny_
+        n_panels_ = (nx_ - 1) * (ny_ - 1)
 
         # Set counters to know where to index the sub-matrix within the full mtx
         i = 0
@@ -314,7 +320,6 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
 
                                     small_mat[cp_loc, el_loc, :] = \
                                         trailing + edges + bound
-                                    # print el_loc, cp_loc, small_mat[cp_loc, el_loc, :].real/(4*numpy.pi)
 
                 else: #   VORTEX RINGS
                     # Spanwise loop through vortex rings
@@ -336,14 +341,11 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                             # the trailing edge mesh points for C & D, else
                             # use the directly aft panel's bound points
                             # for C & D
+                            C = bpts[el_i + 1, el_j + 1, :]
+                            D = bpts[el_i + 1, el_j + 0, :]
                             if el_i == nx_ - 2:
-                                C = bpts[el_i + 1, el_j + 1, :]
-                                D = bpts[el_i + 1, el_j + 0, :]
                                 C_far = 1.e6 * u + C
                                 D_far = 1.e6 * u + D
-                            else:
-                                C = bpts[el_i + 1, el_j + 1, :]
-                                D = bpts[el_i + 1, el_j + 0, :]
 
                             # Spanwise loop through control points
                             for cp_j in xrange(ny - 1):
@@ -377,7 +379,7 @@ def _assemble_AIC_mtx(mtx, params, surfaces, skip=False):
                                             if el_i < nx_-2:
                                                 gamma += _calc_vorticity(C, D, P)
 
-                                    if el_i == nx_ - 2:
+                                    if el_i == nx_ - 2 and not transient:
                                         gamma += _calc_vorticity(C, C_far, P)
                                         gamma += _calc_vorticity(D_far, D, P)
 
@@ -431,22 +433,38 @@ class VLMGeometry(Component):
 
     """
 
-    def __init__(self, surface, t, dt):
+    def __init__(self, surface, t, dt, transient):
         super(VLMGeometry, self).__init__()
 
         self.surface = surface
+        self.transient = transient
 
         ny = surface['num_y']
         nx = surface['num_x']
 
+        self.add_param('v', val=0.)
+        self.add_param('alpha', val=0.)
         self.add_param('def_mesh', val=numpy.zeros((nx, ny, 3),
                        dtype="complex"))
+
+        if t > 0:
+            self.add_param('prev_wake_b_pts', val=numpy.zeros((t, ny, 3)))
+
         self.add_output('b_pts', val=numpy.zeros((nx, ny, 3),
                         dtype="complex"))
         self.add_output('c_pts', val=numpy.zeros((nx-1, ny-1, 3)))
         self.add_output('widths', val=numpy.zeros((nx-1, ny-1)))
         self.add_output('normals', val=numpy.zeros((nx-1, ny-1, 3)))
         self.add_output('S_ref', val=0.)
+
+        self.add_output('wake_b_pts', val=numpy.zeros((t+1, ny, 3),
+                        dtype="complex"))
+
+        self.t = t
+        self.dt = dt
+
+        self.deriv_options['type'] = 'cs'
+        self.deriv_options['form'] = 'central'
 
     def solve_nonlinear(self, params, unknowns, resids):
         mesh = params['def_mesh']
@@ -458,7 +476,8 @@ class VLMGeometry(Component):
 
         # Populate the last row of b_pts with the extrapolated mesh
         # May need to incorporate the timestep and velocity here like Gio
-        b_pts[-1, :, :] = .25 * (mesh[-1, :, :] - mesh[-2, :, :]) + mesh[-1, :, :]
+        direction = mesh[-1, :, :] - mesh[-2, :, :]
+        b_pts[-1, :, :] = .3 * params['v'] * self.dt * direction + mesh[-1, :, :]
 
         # Compute the collocation points at the midpoints of each
         # panel's 3/4 chord line
@@ -477,59 +496,50 @@ class VLMGeometry(Component):
             mesh[:-1, :-1, :] - mesh[1:,  1:, :],
             axis=2)
 
+        # Compute the area of the panels based on the normals.
+        # Note that the area is computed from the normals based on the mesh.
+        S_ref = 0.5 * numpy.sum(numpy.sqrt(numpy.sum(normals**2, axis=2)))
+
+        # Compute the normals of the bound points.
+        normals = numpy.cross(
+            b_pts[:-1,  1:, :] - b_pts[1:, :-1, :],
+            b_pts[:-1, :-1, :] - b_pts[1:,  1:, :],
+            axis=2)
+
+        # Normalize the normals based on their magnitudes.
         norms = numpy.sqrt(numpy.sum(normals**2, axis=2))
 
         for j in xrange(3):
             normals[:, :, j] /= norms
 
         # Store each array
-        unknowns['b_pts'] = b_pts
+        unknowns['S_ref'] = S_ref
         unknowns['c_pts'] = c_pts
         unknowns['widths'] = widths
         unknowns['normals'] = normals
-        unknowns['S_ref'] = 0.5 * numpy.sum(norms)
 
-    def linearize(self, params, unknowns, resids):
-        """ Jacobian for geometry."""
+        ### END OF PREVIOUS GEOMETRY CALCULATIONS
 
-        jac = self.alloc_jacobian()
+        ### START OF WAKE GEOMETRY CALCULATIONS
 
-        fd_jac = self.complex_step_jacobian(params, unknowns, resids,
-                                            fd_params=['def_mesh'],
-                                            fd_unknowns=['widths', 'normals',
-                                                         'S_ref', 'b_pts', 'c_pts'],
-                                            fd_states=[])
-        jac.update(fd_jac)
-
-        return jac
-
-
-class WakeGeometry(Component):
-    """
-    """
-
-    def __init__(self, surface, t, dt):
-        super(WakeGeometry, self).__init__()
-
-        self.surface = surface
-        self.ny = surface['num_y']
-        self.nx = surface['num_x']
-
-        self.add_param('b_pts', val=numpy.zeros((self.nx, self.ny, 3),
-                       dtype="complex"))
-        self.add_output('wake_b_pts', val=numpy.zeros((t, self.ny, 3),
-                        dtype="complex"))
-
-        self.t = t
-        self.dt = dt
-
-    def solve_nonlinear(self, params, unknowns, resids):
-        b_pts = params['b_pts']
 
         if self.t == 0:
             old_wake = b_pts[-1, :, :]
-        # else:
-        #     old_wake = params['old_wake_b_pts']
+        else:
+            # change this for real
+            old_wake = params['prev_wake_b_pts']
+
+        alpha = params['alpha']*numpy.pi/180.
+        cosa = numpy.cos(alpha)
+        sina = numpy.sin(alpha)
+        freestream_direction = numpy.array([cosa, 0., sina])
+
+        distance = params['v'] * self.dt * freestream_direction
+
+        # Wake bound points only matter after t > 0.
+        # In the first timestep there is no wake.
+        unknowns['wake_b_pts'][1:, :, :] = old_wake + distance
+        unknowns['wake_b_pts'][0, :, :] = b_pts[-1, :, :]
 
 
 class VLMCirculations(Component):
@@ -563,10 +573,12 @@ class VLMCirculations(Component):
 
     """
 
-    def __init__(self, surfaces, prob_dict):
+    def __init__(self, surfaces, transient, t, dt):
         super(VLMCirculations, self).__init__()
 
         self.surfaces = surfaces
+        self.transient = transient
+        self.t = t
 
         for surface in surfaces:
             self.surface = surface
@@ -581,9 +593,15 @@ class VLMCirculations(Component):
             self.add_param(name+'c_pts', val=numpy.zeros((nx-1, ny-1, 3),
                            dtype="complex"))
             self.add_param(name+'normals', val=numpy.zeros((nx-1, ny-1, 3)))
+            self.add_param(name+'wake_b_pts', val=numpy.zeros((t+1, ny, 3),
+                            dtype="complex"))
 
-        self.add_param('v', val=prob_dict['v'])
-        self.add_param('alpha', val=prob_dict['alpha'])
+            if t > 0:
+                self.add_param(name+'prev_circ', val=numpy.zeros((t, ny-1), dtype='complex'))
+
+
+        self.add_param('v', val=0.)
+        self.add_param('alpha', val=0.)
 
         self.deriv_options['linearize'] = True  # only for circulations
 
@@ -602,8 +620,8 @@ class VLMCirculations(Component):
 
     def _assemble_system(self, params):
 
-        # Actually assemble the AIC matrix
-        _assemble_AIC_mtx(self.AIC_mtx, params, self.surfaces)
+        # Actually assemble the AIC matrix for the wing
+        _assemble_AIC_mtx(self.AIC_mtx, params, self.surfaces, self.transient)
 
         # Construct an flattend array with the normals of each surface in order
         # so we can do the normals with velocities to set up the right-hand-side
@@ -612,35 +630,53 @@ class VLMCirculations(Component):
         i = 0
         for surface in self.surfaces:
             name = surface['name']
-            num_panels = (surface['num_x'] - 1) * (surface['num_y'] - 1)
+            nx, ny = surface['num_x'], surface['num_y']
+            num_panels = (nx - 1) * (ny - 1)
             if horseshoe:
                 flattened_normals[i:i+num_panels, :] = params[name+'normals'].reshape(-1, 3, order='F')
             else:
                 flattened_normals[i:i+num_panels, :] = params[name+'normals'].reshape(-1, 3, order='C')
+
+            if self.t > 0:
+                # mult! change size of matrix
+                wake_mtx = numpy.zeros((num_panels, self.t*(ny-1), 3), dtype='complex')
+
+                # Actually assemble the AIC matrix for the wake on the wing
+                _assemble_AIC_mtx(wake_mtx, params, self.surfaces, self.transient, wake=True)
+
+                circ = params[name+'prev_circ'].reshape(-1, order='C')
+                v_ind_wake = numpy.zeros((num_panels, 3))
+                for ind in xrange(3):
+                    v_ind_wake[:, ind] = wake_mtx[:, :, ind].dot(circ)
+
             i += num_panels
 
         # Construct a matrix that is the AIC_mtx dotted by the normals at each
         # collocation point. This is used to compute the circulations
         self.mtx[:, :] = 0.
         for ind in xrange(3):
-            self.mtx[:, :] += (self.AIC_mtx[:, :, ind].T *
-                flattened_normals[:, ind]).T
+            self.mtx[:, :] += (self.AIC_mtx[:, :, ind].T * flattened_normals[:, ind]).T
 
         # Obtain the freestream velocity direction and magnitude by taking
         # alpha into account
         alpha = params['alpha'] * numpy.pi / 180.
         cosa = numpy.cos(alpha)
         sina = numpy.sin(alpha)
-        v_inf = params['v'] * numpy.array([cosa, 0., sina], dtype="complex")
+        v = params['v'] * numpy.array([cosa, 0., sina], dtype="complex")
 
         # Populate the right-hand side of the linear system with the
         # expected velocities at each collocation point
         if horseshoe:
-            self.rhs[:] = -flattened_normals.\
-                reshape(-1, flattened_normals.shape[-1], order='F').dot(v_inf)
+            self.rhs[:] = -flattened_normals.reshape(-1, 3, order='F').dot(v)
         else:
-            self.rhs[:] = -flattened_normals.\
-                reshape(-1, flattened_normals.shape[-1], order='C').dot(v_inf)
+            v_vec = numpy.ones((self.rhs.shape[0], 3)) * v
+            self.rhs[:] = -flattened_normals.reshape(-1, 3, order='C').dot(v)
+            if self.t > 0:
+                v_vec += v_ind_wake
+                self.rhs[:] = -numpy.sum(flattened_normals.reshape(-1, 3, order='C') * (v_vec), axis=1)
+            else:
+                self.rhs[:] = -flattened_normals.reshape(-1, 3, order='C').dot(v)
+
 
     def solve_nonlinear(self, params, unknowns, resids):
         """ Solve the linear system to obtain circulations. """
@@ -721,7 +757,7 @@ class VLMForces(Component):
 
     """
 
-    def __init__(self, surfaces, prob_dict):
+    def __init__(self, surfaces, transient, t, dt):
         super(VLMForces, self).__init__()
 
         tot_panels = 0
@@ -735,6 +771,11 @@ class VLMForces(Component):
             self.add_param(name+'b_pts', val=numpy.zeros((nx, ny, 3), dtype='complex'))
             self.add_param(name+'widths', val=numpy.zeros((nx-1, ny-1), dtype='complex'))
             self.add_output(name+'sec_forces', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
+            self.add_output(name+'wake_circ', val=numpy.zeros((t+1, ny-1), dtype='complex'))
+
+            if t > 0:
+                self.add_param(name+'prev_circ', val=numpy.zeros((t, ny-1), dtype='complex'))
+
 
         self.tot_panels = tot_panels
         self.add_param('circulations', val=numpy.zeros((tot_panels)))
@@ -742,9 +783,11 @@ class VLMForces(Component):
         self.add_param('v', val=10.)
         self.add_param('rho', val=3.)
         self.surfaces = surfaces
+        self.transient = transient
 
         self.mtx = numpy.zeros((tot_panels, tot_panels, 3), dtype="complex")
         self.v = numpy.zeros((tot_panels, 3), dtype="complex")
+        self.t = t
 
         # self.deriv_options['type'] = 'fd'
         # self.deriv_options['form'] = 'central'
@@ -758,7 +801,7 @@ class VLMForces(Component):
         # Assemble a different matrix here than the AIC_mtx from above; Note
         # that the collocation points used here are the midpoints of each
         # bound vortex filament, not the collocation points from above
-        _assemble_AIC_mtx(self.mtx, params, self.surfaces, skip=True)
+        _assemble_AIC_mtx(self.mtx, params, self.surfaces, self.transient, skip=True)
 
         # Compute the induced velocities at the midpoints of the
         # bound vortex filaments
@@ -809,6 +852,10 @@ class VLMForces(Component):
 
 
                 unknowns[name+'sec_forces'] = params['rho'] * sec_forces.reshape((nx-1, ny-1, 3), order='C')
+
+                unknowns[name+'wake_circ'][0, :] = circ_slice[-1, :]
+                if self.t > 0:
+                    unknowns[name+'wake_circ'][1:, :] = params[name+'prev_circ']
 
             i += num_panels
 
@@ -897,8 +944,8 @@ class VLMLiftDrag(Component):
         self.deriv_options['form'] = 'central'
 
     def solve_nonlinear(self, params, unknowns, resids):
-        alpha = params['alpha'] * numpy.pi / 180.
         forces = params['sec_forces'].reshape(-1, 3)
+        alpha = params['alpha'] * numpy.pi / 180.
         cosa = numpy.cos(alpha)
         sina = numpy.sin(alpha)
 
@@ -992,15 +1039,18 @@ class VLMCoeffs(Component):
 class VLMStates(Group):
     """ Group that contains the aerodynamic states. """
 
-    def __init__(self, surfaces, prob_dict, t, dt):
+    def __init__(self, surfaces, t, dt, transient):
         super(VLMStates, self).__init__()
 
         self.add('circulations',
-                 VLMCirculations(surfaces, prob_dict),
+                 VLMCirculations(surfaces, transient, t, dt),
                  promotes=['*'])
         self.add('forces',
-                 VLMForces(surfaces, prob_dict),
+                 VLMForces(surfaces, transient, t, dt),
                  promotes=['*'])
+
+        if t == 0:
+            print 'Transient =', transient
 
 
 class VLMFunctionals(Group):

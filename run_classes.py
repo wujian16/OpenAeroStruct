@@ -22,7 +22,7 @@ from openmdao.devtools.partition_tree_n2 import view_tree
 # =============================================================================
 from geometry import GeometryMesh, Bspline, gen_crm_mesh, gen_rect_mesh
 from transfer import TransferDisplacements, TransferLoads
-from vlm import VLMStates, VLMFunctionals, VLMGeometry, WakeGeometry
+from vlm import VLMStates, VLMFunctionals, VLMGeometry
 from spatialbeam import SpatialBeamStates, SpatialBeamFunctionals, radii, SpatialBeamFEM, SpatialBeamDisp
 from materials import MaterialsTube
 from functionals import FunctionalBreguetRange, FunctionalEquilibrium
@@ -492,7 +492,7 @@ class OASProblem():
 
         # Add a single 'aero_states' component that solves for the circulations
         # and forces from all the surfaces.
-        # While other components only depends on a single surface,
+        # While other components only depend on a single surface,
         # this component requires information from all surfaces because
         # each surface interacts with the others.
         dt = self.prob_dict['final_t'] / self.prob_dict['num_dt']
@@ -503,7 +503,8 @@ class OASProblem():
 
         # Loop over all timesteps desired and create groups
         for t in xrange(self.prob_dict['num_dt']):
-            ts_group_name = 'timestep_' + str(t)
+            ts_group_name = 'timestep_{}.'.format(t)
+            ts_prev_name = 'timestep_{}.'.format(t-1)
 
             if transient:
                 ts_group = Group()
@@ -511,7 +512,7 @@ class OASProblem():
                 ts_group = root
 
             ts_group.add('aero_states',
-                     VLMStates(self.surfaces, self.prob_dict, t, dt),
+                     VLMStates(self.surfaces, t, dt, transient),
                      promotes=['v', 'alpha', 'rho'])
 
             # Loop over each surface in the surfaces list
@@ -522,12 +523,8 @@ class OASProblem():
                 name = surface['name']
 
                 ts_group.add(name + 'geom',
-                         VLMGeometry(surface, t, dt),
-                         promotes=[])
-
-                ts_group.add(name + 'wake',
-                             WakeGeometry(surface, t, dt),
-                             promotes=[])
+                         VLMGeometry(surface, t, dt, transient),
+                         promotes=['v', 'alpha'])
 
                 # Add a performance group for each surface
                 name = name + 'perf'
@@ -543,8 +540,15 @@ class OASProblem():
                 # Perform the connections with the modified names within the
                 # 'aero_states' group.
                 if transient:
-                    root.connect(name[:-1] + '.def_mesh', ts_group_name + '.' + name + 'geom.def_mesh')
-                    root.connect(ts_group_name + '.' + name + 'geom.b_pts', ts_group_name + '.' + name + 'wake.b_pts')
+                    root.connect(name[:-1] + '.def_mesh', ts_group_name + name + 'geom.def_mesh')
+                    root.connect(ts_group_name + name + 'geom.wake_b_pts', ts_group_name + 'aero_states.' + name + 'wake_b_pts')
+
+                    if t > 0:
+                        root.connect(ts_prev_name + name + 'geom.wake_b_pts', ts_group_name + name + 'geom.prev_wake_b_pts')
+                        root.connect(ts_prev_name + 'aero_states.' + name + 'wake_circ', ts_group_name + 'aero_states.' + name + 'prev_circ')
+
+
+
                 else:
                     root.connect(name[:-1] + '.def_mesh', name + 'geom.def_mesh')
 
@@ -562,7 +566,7 @@ class OASProblem():
                 ts_group.connect(name + 'geom.S_ref', name + 'perf.S_ref')
 
             if transient:
-                exec('root.add("' + ts_group_name + '", ts_group, promotes=["v", "alpha", "M", "Re", "rho"])')
+                exec('root.add("' + ts_group_name[:-1] + '", ts_group, promotes=["v", "alpha", "M", "Re", "rho"])')
 
         # Actually set up the problem
         self.setup_prob()
@@ -681,7 +685,7 @@ class OASProblem():
         # Add a single 'aero_states' component for the whole system within the
         # coupled group.
         coupled.add('aero_states',
-                 VLMStates(self.surfaces, self.prob_dict, t, dt),
+                 VLMStates(self.surfaces, t, dt),
                  promotes=['v', 'alpha', 'rho'])
 
         # Explicitly connect parameters from each surface's group and the common
@@ -778,7 +782,7 @@ class OASProblem():
                  FunctionalBreguetRange(self.surfaces, self.prob_dict),
                  promotes=['fuelburn'])
         root.add('eq_con',
-                 FunctionalEquilibrium(self.surfaces, self.prob_dict),
+                 FunctionalEquilibrium(self.surfaces),
                  promotes=['eq_con', 'fuelburn'])
 
         # Actually set up the system

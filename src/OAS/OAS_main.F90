@@ -429,7 +429,7 @@ contains
     ! Input
     integer, intent(in) :: ny, nx, ny_, nx_
     complex(kind=8), intent(in) :: alpha, mesh(nx_, ny_, 3)
-    complex(kind=8), intent(in) :: points(nx-1, ny-1, 3), bpts(nx_-1, ny_, 3)
+    complex(kind=8), intent(in) :: points(nx-1, ny-1, 3), bpts(nx_, ny_, 3)
     logical, intent(in) :: skip, symmetry, horseshoe
 
     ! Output
@@ -437,7 +437,7 @@ contains
 
     ! Working
     integer :: el_j, el_i, cp_j, cp_i, el_loc_j, el_loc, cp_loc_j, cp_loc
-    complex(kind=8) :: pi, P(3), A(3), B(3), u(3), C(3), D(3)
+    complex(kind=8) :: pi, P(3), A(3), B(3), u(3), C(3), D(3), C_far(3), D_far(3)
     complex(kind=8) :: A_sym(3), B_sym(3), C_sym(3), D_sym(3)
     complex(kind=8) :: ur2(3), r1(3), r2(3), r1_mag, r2_mag
     complex(kind=8) :: ur1(3), bound(3), dot_ur2, dot_ur1
@@ -449,6 +449,9 @@ contains
     u(1) = cos(alpha * pi / 180.)
     u(2) = 0.
     u(3) = sin(alpha * pi / 180.)
+
+    u(1) = 1.
+    u(3) = 0.
 
     mtx(:, :, :) = 0.
 
@@ -566,12 +569,12 @@ contains
           A = bpts(el_i + 0, el_j + 0, :)
           B = bpts(el_i + 0, el_j + 1, :)
 
+          C = bpts(el_i + 1, el_j + 1, :)
+          D = bpts(el_i + 1, el_j + 0, :)
+
           if (el_i .EQ. nx_ - 1) then
-            C = u * 1.e6 + bpts(el_i, el_j + 1, :)
-            D = u * 1.e6 + bpts(el_i, el_j + 0, :)
-          else
-            C = bpts(el_i + 1, el_j + 1, :)
-            D = bpts(el_i + 1, el_j + 0, :)
+            C_far = 1.e6 * u + C
+            D_far = 1.e6 * u + D
           end if
 
           do cp_j = 1, ny-1 ! spanwise loop through control points
@@ -589,7 +592,26 @@ contains
 
               if (.not. skip) then
                 call calc_vorticity(A, B, P, bound)
-                call calc_vorticity(C, D, P, bound)
+
+                if (el_i .lt. nx_ - 1) then
+                  call calc_vorticity(C, D, P, bound)
+                end if
+
+              else
+                if (.not. (el_loc .eq. cp_loc)) then
+                  call calc_vorticity(A, B, P, bound)
+                end if
+
+                if (.not. ((el_i + 1 .eq. cp_i) .and. (el_j .eq. cp_j))) then
+                  if (el_i .lt. nx_ - 1) then
+                    call calc_vorticity(C, D, P, bound)
+                  end if
+                end if
+              end if
+
+              if (el_i .eq. nx_ - 1) then
+                call calc_vorticity(C, C_far, P, bound)
+                call calc_vorticity(D_far, D, P, bound)
               end if
 
               mtx(cp_loc, el_loc, :) = bound

@@ -130,10 +130,10 @@ python module OAS_API ! in
                 integer, optional,intent(in),check((shape(points,1)+1)==ny),depend(points) :: ny=(shape(points,1)+1)
                 integer, optional,intent(in),check((shape(points,0)+1)==nx),depend(points) :: nx=(shape(points,0)+1)
                 integer, optional,intent(in),check(shape(bpts,1)==ny_),depend(bpts) :: ny_=shape(bpts,1)
-                integer, optional,intent(in),check((shape(bpts,0)+1)==nx_),depend(bpts) :: nx_=(shape(bpts,0)+1)
+                integer, optional,intent(in),check(shape(bpts,0)==nx_),depend(bpts) :: nx_=shape(bpts,0)
                 complex(kind=8) intent(in) :: alpha
                 complex(kind=8) dimension(nx - 1,ny - 1,3),intent(in) :: points
-                complex(kind=8) dimension(nx_ - 1,ny_,3),intent(in) :: bpts
+                complex(kind=8) dimension(nx_,ny_,3),intent(in) :: bpts
                 complex(kind=8) dimension(nx_,ny_,3),intent(in),depend(nx_,ny_) :: mesh
                 logical intent(in) :: skip
                 logical intent(in) :: symmetry

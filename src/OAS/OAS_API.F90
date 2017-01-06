@@ -124,7 +124,7 @@ contains
     ! Input
     integer, intent(in) :: ny, nx, ny_, nx_
     complex(kind=8), intent(in) :: alpha, mesh(nx_, ny_, 3)
-    complex(kind=8), intent(in) :: points(nx-1, ny-1, 3), bpts(nx_-1, ny_, 3)
+    complex(kind=8), intent(in) :: points(nx-1, ny-1, 3), bpts(nx_, ny_, 3)
     logical, intent(in) :: skip, symmetry, horseshoe
 
     ! Output

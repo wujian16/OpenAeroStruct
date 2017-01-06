@@ -48,7 +48,7 @@ class FunctionalBreguetRange(Component):
 class FunctionalEquilibrium(Component):
     """ L = W constraint """
 
-    def __init__(self, surfaces, prob_dict):
+    def __init__(self, surfaces):
         super(FunctionalEquilibrium, self).__init__()
 
         self.surfaces = surfaces

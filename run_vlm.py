@@ -33,7 +33,7 @@ if __name__ == "__main__":
     OAS_prob.add_surface({'name' : 'wing',
                         #   'wing_type' : 'CRM',
                           'symmetry' : False,
-                          'num_y' : 9,
+                          'num_y' : 5,
                           'num_x' : 3,
                           'span_cos_spacing' : 0.,
                         #   'taper' : .2,
@@ -47,8 +47,9 @@ if __name__ == "__main__":
         OAS_prob.setup()
         # OAS_prob.add_desvar('wing.twist_cp', lower=-10., upper=15.)
         OAS_prob.add_desvar('wing.sweep', lower=10., upper=30.)
-        # OAS_prob.add_desvar('wing.dihedral', lower=-10., upper=20.)
+        OAS_prob.add_desvar('wing.dihedral', lower=-10., upper=20.)
         OAS_prob.add_desvar('wing.taper', lower=.5, upper=2.)
+        OAS_prob.add_desvar('alpha', lower=-10., upper=10.)
         OAS_prob.add_constraint('wing_perf.CL', equals=0.5)
         OAS_prob.add_objective('wing_perf.CD', scaler=1e4)
 
