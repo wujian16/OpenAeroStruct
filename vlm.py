@@ -192,7 +192,7 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
             # Dense fortran assembly for the AIC matrix
             if fortran_flag:
                 small_mat[:, :, :] = OAS_API.oas_api.assembleaeromtx(alpha, pts, bpts,
-                                                         mesh, skip, symmetry, horseshoe)
+                                                         skip, symmetry, transient)
             # Python matrix assembly
             else:
 
