@@ -249,10 +249,10 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
                                         gamma += _calc_vorticity(B_sym, A_sym, P)
 
                                     if not wake:
-                                        # if el_i < nx_ - 2:
-                                        gamma += _calc_vorticity(C, D, P)
-                                        if symmetry:
-                                            gamma += _calc_vorticity(D_sym, C_sym, P)
+                                        if el_i < nx_ - 2:
+                                            gamma += _calc_vorticity(C, D, P)
+                                            if symmetry:
+                                                gamma += _calc_vorticity(D_sym, C_sym, P)
                                     else:
                                         gamma += _calc_vorticity(C, D, P)
                                         if symmetry:
@@ -741,6 +741,7 @@ class VLMForces(Component):
 
             circ_slice = circ[i:i+num_panels].reshape(nx-1, ny-1, order='F')
             cross_slice = cross.reshape(nx-1, ny-1, 3, order='F')
+
             # Compute the sectional forces acting on each panel
             for ind in xrange(3):
                 sec_forces[:ny-1, ind] = circ_slice[0, :] * cross_slice[0, :, ind]
