@@ -39,10 +39,6 @@ try:
 except:
     fortran_flag = False
 
-horseshoe = False
-print "Horseshoes =", horseshoe
-print
-
 def view_mat(mat):
     """ Helper function used to visually examine matrices. """
     import matplotlib.pyplot as plt
@@ -195,20 +191,40 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
                                                          skip, symmetry, transient)
             # Python matrix assembly
             else:
+                # Spanwise loop through vortex rings
+                for el_j in xrange(ny_ - 1):
+                    el_loc_j = el_j * (nx_ - 1)
 
-                if horseshoe:
-                    # Spanwise loop through horseshoe elements
-                    for el_j in xrange(ny_ - 1):
-                        el_loc_j = el_j * (nx_ - 1)
-                        C_te = mesh[-1, el_j + 1, :]
-                        D_te = mesh[-1, el_j + 0, :]
+                    # Chordwise loop through horseshoe elements in
+                    # reversed order, starting with the panel closest
+                    # to the leading edge. This is done to sum the
+                    # AIC contributions from the side vortex filaments
+                    # as we loop through the elements
+                    for el_i in xrange(nx_ - 1):
+                        el_loc = el_i + el_loc_j
 
-                        # Mirror the horseshoe vortex points
+                        A = bpts[el_i, el_j + 0, :]
+                        B = bpts[el_i, el_j + 1, :]
+
+                        # Check if this is the last panel; if so, use
+                        # the trailing edge mesh points for C & D, else
+                        # use the directly aft panel's bound points
+                        # for C & D
+                        C = bpts[el_i + 1, el_j + 1, :]
+                        D = bpts[el_i + 1, el_j + 0, :]
+                        if el_i == nx_ - 2:
+                            C_far = 1.e6 * u + C
+                            D_far = 1.e6 * u + D
+
                         if symmetry:
-                            C_te_sym = C_te.copy()
-                            D_te_sym = D_te.copy()
-                            C_te_sym[1] = -C_te_sym[1]
-                            D_te_sym[1] = -D_te_sym[1]
+                            sym = numpy.array([1., -1., 1.])
+                            A_sym = A * sym
+                            B_sym = B * sym
+                            C_sym = C * sym
+                            D_sym = D * sym
+                            if el_i == nx_ - 2:
+                                C_far_sym = C_far * sym
+                                D_far_sym = D_far * sym
 
                         # Spanwise loop through control points
                         for cp_j in xrange(ny - 1):
@@ -220,218 +236,71 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
 
                                 P = pts[cp_i, cp_j]
 
-                                r1 = P - D_te
-                                r2 = P - C_te
-
-                                r1_mag = norm(r1)
-                                r2_mag = norm(r2)
-
-                                t1 = numpy.cross(u, r2) / \
-                                    (r2_mag * (r2_mag - u.dot(r2)))
-                                t3 = numpy.cross(u, r1) / \
-                                    (r1_mag * (r1_mag - u.dot(r1)))
-
-                                # AIC contribution from trailing vortex filaments
-                                # coming off the trailing edge
-                                trailing = t1 - t3
-
-                                # Calculate the effects across the symmetry plane
+                                gamma = 0.
+                                gamma += _calc_vorticity(B, C, P)
+                                gamma += _calc_vorticity(D, A, P)
                                 if symmetry:
-                                    r1 = P - D_te_sym
-                                    r2 = P - C_te_sym
+                                    gamma += _calc_vorticity(C_sym, B_sym, P)
+                                    gamma += _calc_vorticity(A_sym, D_sym, P)
 
-                                    r1_mag = norm(r1)
-                                    r2_mag = norm(r2)
-
-                                    t1 = numpy.cross(u, r2) / \
-                                        (r2_mag * (r2_mag - u.dot(r2)))
-                                    t3 = numpy.cross(u, r1) / \
-                                        (r1_mag * (r1_mag - u.dot(r1)))
-
-                                    trailing += t3 - t1
-
-                                edges = 0
-
-                                # Chordwise loop through horseshoe elements in
-                                # reversed order, starting with the panel closest
-                                # to the leading edge. This is done to sum the
-                                # AIC contributions from the side vortex filaments
-                                # as we loop through the elements
-                                for el_i in reversed(xrange(nx_ - 1)):
-                                    el_loc = el_i + el_loc_j
-
-                                    A = bpts[el_i, el_j + 0, :]
-                                    B = bpts[el_i, el_j + 1, :]
-
-                                    # Check if this is the last panel; if so, use
-                                    # the trailing edge mesh points for C & D, else
-                                    # use the directly aft panel's bound points
-                                    # for C & D
-                                    if el_i == nx_ - 2:
-                                        C = mesh[-1, el_j + 1, :]
-                                        D = mesh[-1, el_j + 0, :]
-                                    else:
-                                        C = bpts[el_i + 1, el_j + 1, :]
-                                        D = bpts[el_i + 1, el_j + 0, :]
-
-                                    # Calculate and store the contributions from
-                                    # the vortex filaments on the sides of the
-                                    # panels, adding as we progress through the
-                                    # panels
-                                    edges += _calc_vorticity(B, C, P)
-                                    edges += _calc_vorticity(D, A, P)
-
-                                    # Mirror the horseshoe vortex points and
-                                    # calculate the effects across
-                                    # the symmetry plane
+                                if not skip:
+                                    gamma += _calc_vorticity(A, B, P)
                                     if symmetry:
-                                        A_sym = A.copy()
-                                        B_sym = B.copy()
-                                        C_sym = C.copy()
-                                        D_sym = D.copy()
-                                        A_sym[1] = -A_sym[1]
-                                        B_sym[1] = -B_sym[1]
-                                        C_sym[1] = -C_sym[1]
-                                        D_sym[1] = -D_sym[1]
+                                        gamma += _calc_vorticity(B_sym, A_sym, P)
 
-                                        edges += _calc_vorticity(C_sym, B_sym, P)
-                                        edges += _calc_vorticity(A_sym, D_sym, P)
-
-                                    # If skip, do not include the contributions
-                                    # from the panel's bound vortex filament, as
-                                    # this causes a singularity when we're taking
-                                    # the influence of a panel on its own
-                                    # collocation point. This true for the drag
-                                    # computation and false for circulation
-                                    # computation, due to the different collocation
-                                    # points.
-                                    if skip and el_loc == cp_loc:
+                                    if not wake:
+                                        # if el_i < nx_ - 2:
+                                        gamma += _calc_vorticity(C, D, P)
                                         if symmetry:
-                                            bound = _calc_vorticity(B_sym, A_sym, P)
-                                        else:
-                                            bound = numpy.zeros((3))
+                                            gamma += _calc_vorticity(D_sym, C_sym, P)
                                     else:
-                                        bound = _calc_vorticity(A, B, P)
-
-                                        # Account for symmetry by including the
-                                        # mirrored bound vortex
+                                        gamma += _calc_vorticity(C, D, P)
                                         if symmetry:
-                                            bound += _calc_vorticity(B_sym, A_sym, P)
+                                            gamma += _calc_vorticity(D_sym, C_sym, P)
 
-                                    small_mat[cp_loc, el_loc, :] = \
-                                        trailing + edges + bound
-
-                else: #   VORTEX RINGS
-                    # Spanwise loop through vortex rings
-                    for el_j in xrange(ny_ - 1):
-                        el_loc_j = el_j * (nx_ - 1)
-
-                        # Chordwise loop through horseshoe elements in
-                        # reversed order, starting with the panel closest
-                        # to the leading edge. This is done to sum the
-                        # AIC contributions from the side vortex filaments
-                        # as we loop through the elements
-                        for el_i in xrange(nx_ - 1):
-                            el_loc = el_i + el_loc_j
-
-                            A = bpts[el_i, el_j + 0, :]
-                            B = bpts[el_i, el_j + 1, :]
-
-                            # Check if this is the last panel; if so, use
-                            # the trailing edge mesh points for C & D, else
-                            # use the directly aft panel's bound points
-                            # for C & D
-                            C = bpts[el_i + 1, el_j + 1, :]
-                            D = bpts[el_i + 1, el_j + 0, :]
-                            if el_i == nx_ - 2:
-                                C_far = 1.e6 * u + C
-                                D_far = 1.e6 * u + D
-
-                            if symmetry:
-                                sym = numpy.array([1., -1., 1.])
-                                A_sym = A * sym
-                                B_sym = B * sym
-                                C_sym = C * sym
-                                D_sym = D * sym
-                                if el_i == nx_ - 2:
-                                    C_far_sym = C_far * sym
-                                    D_far_sym = D_far * sym
-
-                            # Spanwise loop through control points
-                            for cp_j in xrange(ny - 1):
-                                cp_loc_j = cp_j * (nx - 1)
-
-                                # Chordwise loop through control points
-                                for cp_i in xrange(nx - 1):
-                                    cp_loc = cp_i + cp_loc_j
-
-                                    P = pts[cp_i, cp_j]
-
-                                    gamma = 0.
-                                    gamma += _calc_vorticity(B, C, P)
-                                    gamma += _calc_vorticity(D, A, P)
-                                    if symmetry:
-                                        gamma += _calc_vorticity(C_sym, B_sym, P)
-                                        gamma += _calc_vorticity(A_sym, D_sym, P)
-
-                                    if not skip:
+                                else:
+                                    if el_loc == cp_loc:
+                                        pass
+                                    else:
                                         gamma += _calc_vorticity(A, B, P)
                                         if symmetry:
                                             gamma += _calc_vorticity(B_sym, A_sym, P)
 
-                                        if not wake:
-                                            # if el_i < nx_ - 2:
-                                            gamma += _calc_vorticity(C, D, P)
-                                            if symmetry:
-                                                gamma += _calc_vorticity(D_sym, C_sym, P)
-                                        else:
-                                            gamma += _calc_vorticity(C, D, P)
-                                            if symmetry:
-                                                gamma += _calc_vorticity(D_sym, C_sym, P)
-
+                                    if el_i + 1 == cp_i and el_j == cp_j:
+                                        pass
                                     else:
-                                        if el_loc == cp_loc:
-                                            pass
-                                        else:
-                                            gamma += _calc_vorticity(A, B, P)
+                                        if el_i < nx_-2:
+                                            gamma += _calc_vorticity(C, D, P)
                                             if symmetry:
-                                                gamma += _calc_vorticity(B_sym, A_sym, P)
+                                                gamma += _calc_vorticity(D_sym, C_sym, P)
 
-                                        if el_i + 1 == cp_i and el_j == cp_j:
-                                            pass
-                                        else:
-                                            if el_i < nx_-2:
-                                                gamma += _calc_vorticity(C, D, P)
-                                                if symmetry:
-                                                    gamma += _calc_vorticity(D_sym, C_sym, P)
+                                if el_i == nx_ - 2 and not transient:
+                                    gamma += _calc_vorticity(C, C_far, P)
+                                    gamma += _calc_vorticity(D_far, D, P)
+                                    if symmetry:
+                                        gamma += _calc_vorticity(C_far_sym, C_sym, P)
+                                        gamma += _calc_vorticity(D_sym, D_far_sym, P)
 
-                                    if el_i == nx_ - 2 and not transient:
-                                        gamma += _calc_vorticity(C, C_far, P)
-                                        gamma += _calc_vorticity(D_far, D, P)
-                                        if symmetry:
-                                            gamma += _calc_vorticity(C_far_sym, C_sym, P)
-                                            gamma += _calc_vorticity(D_sym, D_far_sym, P)
-
-                                    # gamma += _calc_vorticity(B, C, P)
-                                    # gamma += _calc_vorticity(D, A, P)
-                                    # gamma += _calc_vorticity(C, D, P)
-                                    # gamma += _calc_vorticity(A, B, P)
-                                    # if symmetry:
-                                    #     gamma += _calc_vorticity(C_sym, B_sym, P)
-                                    #     gamma += _calc_vorticity(A_sym, D_sym, P)
-                                    #     gamma += _calc_vorticity(D_sym, C_sym, P)
-                                    #     gamma += _calc_vorticity(B_sym, A_sym, P)
+                                # gamma += _calc_vorticity(B, C, P)
+                                # gamma += _calc_vorticity(D, A, P)
+                                # gamma += _calc_vorticity(C, D, P)
+                                # gamma += _calc_vorticity(A, B, P)
+                                # if symmetry:
+                                #     gamma += _calc_vorticity(C_sym, B_sym, P)
+                                #     gamma += _calc_vorticity(A_sym, D_sym, P)
+                                #     gamma += _calc_vorticity(D_sym, C_sym, P)
+                                #     gamma += _calc_vorticity(B_sym, A_sym, P)
 
 
-                                    # If skip, do not include the contributions
-                                    # from the panel's bound vortex filament, as
-                                    # this causes a singularity when we're taking
-                                    # the influence of a panel on its own
-                                    # collocation point. This true for the drag
-                                    # computation and false for circulation
-                                    # computation, due to the different collocation
-                                    # points.
-                                    small_mat[cp_loc, el_loc, :] = gamma
+                                # If skip, do not include the contributions
+                                # from the panel's bound vortex filament, as
+                                # this causes a singularity when we're taking
+                                # the influence of a panel on its own
+                                # collocation point. This true for the drag
+                                # computation and false for circulation
+                                # computation, due to the different collocation
+                                # points.
+                                small_mat[cp_loc, el_loc, :] = gamma
 
             # exit()
             # Populate the full-size matrix with these surface-surface AICs
@@ -675,10 +544,7 @@ class VLMCirculations(Component):
             name = surface['name']
             nx, ny = surface['num_x'], surface['num_y']
             num_panels = (nx - 1) * (ny - 1)
-            if horseshoe:
-                flattened_normals[i:i+num_panels, :] = params[name+'normals'].reshape(-1, 3, order='F')
-            else:
-                flattened_normals[i:i+num_panels, :] = params[name+'normals'].reshape(-1, 3, order='C')
+            flattened_normals[i:i+num_panels, :] = params[name+'normals'].reshape(-1, 3, order='C')
 
             if self.t > 0:
                 # mult! change size of matrix
@@ -709,16 +575,13 @@ class VLMCirculations(Component):
 
         # Populate the right-hand side of the linear system with the
         # expected velocities at each collocation point
-        if horseshoe:
-            self.rhs[:] = -flattened_normals.reshape(-1, 3, order='F').dot(v)
+        v_vec = numpy.ones((self.rhs.shape[0], 3)) * v
+        self.rhs[:] = -flattened_normals.reshape(-1, 3, order='C').dot(v)
+        if self.t > 0:
+            v_vec += v_ind_wake
+            self.rhs[:] = -numpy.sum(flattened_normals.reshape(-1, 3, order='C') * (v_vec), axis=1)
         else:
-            v_vec = numpy.ones((self.rhs.shape[0], 3)) * v
             self.rhs[:] = -flattened_normals.reshape(-1, 3, order='C').dot(v)
-            if self.t > 0:
-                v_vec += v_ind_wake
-                self.rhs[:] = -numpy.sum(flattened_normals.reshape(-1, 3, order='C') * (v_vec), axis=1)
-            else:
-                self.rhs[:] = -flattened_normals.reshape(-1, 3, order='C').dot(v)
 
 
     def solve_nonlinear(self, params, unknowns, resids):
@@ -876,33 +739,24 @@ class VLMForces(Component):
 
             sec_forces = numpy.zeros((num_panels, 3), dtype='complex')
 
-            if horseshoe:
-                # Compute the sectional forces acting on each panel
-                for ind in xrange(3):
-                    sec_forces[:, ind] = circ[i:i+num_panels] * cross[:, ind]
-                unknowns[name+'sec_forces'] = params['rho'] * sec_forces.reshape((nx-1, ny-1, 3), order='F')
+            circ_slice = circ[i:i+num_panels].reshape(nx-1, ny-1, order='F')
+            cross_slice = cross.reshape(nx-1, ny-1, 3, order='F')
+            # Compute the sectional forces acting on each panel
+            for ind in xrange(3):
+                sec_forces[:ny-1, ind] = circ_slice[0, :] * cross_slice[0, :, ind]
 
-                lift = drag = unknowns[name+'sec_forces']
-
-            else:
-                circ_slice = circ[i:i+num_panels].reshape(nx-1, ny-1, order='F')
-                cross_slice = cross.reshape(nx-1, ny-1, 3, order='F')
-                # Compute the sectional forces acting on each panel
-                for ind in xrange(3):
-                    sec_forces[:ny-1, ind] = circ_slice[0, :] * cross_slice[0, :, ind]
-
-                    for j in xrange(1, nx - 1):
-                        sec_forces[j*(ny-1):(j+1)*(ny-1), ind] = \
-                            (circ_slice[j, :] - circ_slice[j-1, :]) * cross_slice[j, :, ind]
+                for j in xrange(1, nx - 1):
+                    sec_forces[j*(ny-1):(j+1)*(ny-1), ind] = \
+                        (circ_slice[j, :] - circ_slice[j-1, :]) * cross_slice[j, :, ind]
 
 
-                unknowns[name+'sec_forces'] = params['rho'] * sec_forces.reshape((nx-1, ny-1, 3), order='C')
+            unknowns[name+'sec_forces'] = params['rho'] * sec_forces.reshape((nx-1, ny-1, 3), order='C')
 
-                print unknowns[name+'sec_forces']
+            print unknowns[name+'sec_forces']
 
-                unknowns[name+'wake_circ'][0, :] = circ_slice[-1, :]
-                if self.t > 0:
-                    unknowns[name+'wake_circ'][1:, :] = params[name+'prev_circ']
+            unknowns[name+'wake_circ'][0, :] = circ_slice[-1, :]
+            if self.t > 0:
+                unknowns[name+'wake_circ'][1:, :] = params[name+'prev_circ']
 
             i += num_panels
 
@@ -1025,7 +879,6 @@ class VLMLiftDrag(Component):
         if self.surface['symmetry']:
             unknowns['D'] *= 2
             unknowns['L'] *= 2
-
 
 class VLMCoeffs(Component):
     """ Compute lift and drag coefficients.
