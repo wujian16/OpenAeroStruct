@@ -189,7 +189,7 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
             # Initialize sub-matrix to populate within full mtx
             small_mat = numpy.zeros((n_panels, n_panels_, 3), dtype='complex')
 
-            # Dense fortran assembly for the AIC matrix
+            # Fortran assembly for the AIC matrix
             if fortran_flag:
                 small_mat[:, :, :] = OAS_API.oas_api.assembleaeromtx(alpha, pts, bpts,
                                                          skip, symmetry, transient)
@@ -347,6 +347,16 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
                                 C_far = 1.e6 * u + C
                                 D_far = 1.e6 * u + D
 
+                            if symmetry:
+                                sym = numpy.array([1., -1., 1.])
+                                A_sym = A * sym
+                                B_sym = B * sym
+                                C_sym = C * sym
+                                D_sym = D * sym
+                                if el_i == nx_ - 2:
+                                    C_far_sym = C_far * sym
+                                    D_far_sym = D_far * sym
+
                             # Spanwise loop through control points
                             for cp_j in xrange(ny - 1):
                                 cp_loc_j = cp_j * (nx - 1)
@@ -360,28 +370,58 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
                                     gamma = 0.
                                     gamma += _calc_vorticity(B, C, P)
                                     gamma += _calc_vorticity(D, A, P)
+                                    if symmetry:
+                                        gamma += _calc_vorticity(C_sym, B_sym, P)
+                                        gamma += _calc_vorticity(A_sym, D_sym, P)
 
                                     if not skip:
                                         gamma += _calc_vorticity(A, B, P)
+                                        if symmetry:
+                                            gamma += _calc_vorticity(B_sym, A_sym, P)
 
-                                        if el_i < nx_ - 2:
+                                        if not wake:
+                                            # if el_i < nx_ - 2:
                                             gamma += _calc_vorticity(C, D, P)
+                                            if symmetry:
+                                                gamma += _calc_vorticity(D_sym, C_sym, P)
+                                        else:
+                                            gamma += _calc_vorticity(C, D, P)
+                                            if symmetry:
+                                                gamma += _calc_vorticity(D_sym, C_sym, P)
 
                                     else:
                                         if el_loc == cp_loc:
                                             pass
                                         else:
                                             gamma += _calc_vorticity(A, B, P)
+                                            if symmetry:
+                                                gamma += _calc_vorticity(B_sym, A_sym, P)
 
                                         if el_i + 1 == cp_i and el_j == cp_j:
                                             pass
                                         else:
                                             if el_i < nx_-2:
                                                 gamma += _calc_vorticity(C, D, P)
+                                                if symmetry:
+                                                    gamma += _calc_vorticity(D_sym, C_sym, P)
 
                                     if el_i == nx_ - 2 and not transient:
                                         gamma += _calc_vorticity(C, C_far, P)
                                         gamma += _calc_vorticity(D_far, D, P)
+                                        if symmetry:
+                                            gamma += _calc_vorticity(C_far_sym, C_sym, P)
+                                            gamma += _calc_vorticity(D_sym, D_far_sym, P)
+
+                                    # gamma += _calc_vorticity(B, C, P)
+                                    # gamma += _calc_vorticity(D, A, P)
+                                    # gamma += _calc_vorticity(C, D, P)
+                                    # gamma += _calc_vorticity(A, B, P)
+                                    # if symmetry:
+                                    #     gamma += _calc_vorticity(C_sym, B_sym, P)
+                                    #     gamma += _calc_vorticity(A_sym, D_sym, P)
+                                    #     gamma += _calc_vorticity(D_sym, C_sym, P)
+                                    #     gamma += _calc_vorticity(B_sym, A_sym, P)
+
 
                                     # If skip, do not include the contributions
                                     # from the panel's bound vortex filament, as
@@ -393,6 +433,7 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
                                     # points.
                                     small_mat[cp_loc, el_loc, :] = gamma
 
+            # exit()
             # Populate the full-size matrix with these surface-surface AICs
             mtx[i_panels:i_panels+n_panels,
                 i_panels_:i_panels_+n_panels_, :] = small_mat
@@ -477,6 +518,9 @@ class VLMGeometry(Component):
         # Populate the last row of b_pts with the extrapolated mesh
         # May need to incorporate the timestep and velocity here like Gio
         direction = mesh[-1, :, :] - mesh[-2, :, :]
+        norm = numpy.linalg.norm(direction, axis=1)
+        for ind in xrange(3):
+            direction[:, ind] /= norm
         b_pts[-1, :, :] = .3 * params['v'] * self.dt * direction + mesh[-1, :, :]
 
         # Compute the collocation points at the midpoints of each
@@ -521,7 +565,6 @@ class VLMGeometry(Component):
         ### END OF PREVIOUS GEOMETRY CALCULATIONS
 
         ### START OF WAKE GEOMETRY CALCULATIONS
-
 
         if self.t == 0:
             old_wake = b_pts[-1, :, :]
@@ -682,6 +725,8 @@ class VLMCirculations(Component):
         """ Solve the linear system to obtain circulations. """
         self._assemble_system(params)
         unknowns['circulations'] = numpy.linalg.solve(self.mtx, self.rhs)
+        print 'circ'
+        print unknowns['circulations']
 
     def apply_nonlinear(self, params, unknowns, resids):
         """ Compute the residuals of the linear system. """
@@ -852,6 +897,8 @@ class VLMForces(Component):
 
 
                 unknowns[name+'sec_forces'] = params['rho'] * sec_forces.reshape((nx-1, ny-1, 3), order='C')
+
+                print unknowns[name+'sec_forces']
 
                 unknowns[name+'wake_circ'][0, :] = circ_slice[-1, :]
                 if self.t > 0:

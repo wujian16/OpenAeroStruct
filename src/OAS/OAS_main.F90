@@ -438,7 +438,7 @@ contains
     ! Working
     integer :: el_j, el_i, cp_j, cp_i, el_loc_j, el_loc, cp_loc_j, cp_loc
     complex(kind=8) :: pi, P(3), A(3), B(3), u(3), C(3), D(3), C_far(3), D_far(3)
-    complex(kind=8) :: A_sym(3), B_sym(3), C_sym(3), D_sym(3)
+    complex(kind=8) :: A_sym(3), B_sym(3), C_sym(3), D_sym(3), C_far_sym(3), D_far_sym(3)
     complex(kind=8) :: ur2(3), r1(3), r2(3), r1_mag, r2_mag
     complex(kind=8) :: ur1(3), bound(3), dot_ur2, dot_ur1
     complex(kind=8) :: edges(3), C_te(3), D_te(3), C_te_sym(3), D_te_sym(3)
@@ -472,6 +472,24 @@ contains
             D_far = 1.e6 * u + D
           end if
 
+          if (symmetry) then
+            A_sym = A
+            A_sym(2) = -A(2)
+            B_sym = B
+            B_sym(2) = -B(2)
+            C_sym = C
+            C_sym(2) = -C(2)
+            D_sym = D
+            D_sym(2) = -D(2)
+
+            if (el_i .EQ. nx_ - 1) then
+              C_far_sym = C_far
+              C_far_sym(2) = -C_far(2)
+              D_far_sym = D_far
+              D_far_sym(2) = -D_far(2)
+            end if
+          end if
+
           do cp_j = 1, ny-1 ! spanwise loop through control points
             cp_loc_j = (cp_j - 1) * (nx - 1)
 
@@ -485,21 +503,39 @@ contains
               call calc_vorticity(B, C, P, bound)
               call calc_vorticity(D, A, P, bound)
 
+              if (symmetry) then
+                call calc_vorticity(C_sym, B_sym, P, bound)
+                call calc_vorticity(A_sym, D_sym, P, bound)
+              end if
+
               if (.not. skip) then
                 call calc_vorticity(A, B, P, bound)
 
+                if (symmetry) then
+                  call calc_vorticity(B_sym, A_sym, P, bound)
+                end if
+
                 if (el_i .lt. nx_ - 1) then
                   call calc_vorticity(C, D, P, bound)
+                  if (symmetry) then
+                    call calc_vorticity(D_sym, C_sym, P, bound)
+                  end if
                 end if
 
               else
                 if (.not. (el_loc .eq. cp_loc)) then
                   call calc_vorticity(A, B, P, bound)
                 end if
+                if (symmetry) then
+                  call calc_vorticity(B_sym, A_sym, P, bound)
+                end if
 
                 if (.not. ((el_i + 1 .eq. cp_i) .and. (el_j .eq. cp_j))) then
                   if (el_i .lt. nx_ - 1) then
                     call calc_vorticity(C, D, P, bound)
+                    if (symmetry) then
+                      call calc_vorticity(D_sym, C_sym, P, bound)
+                    end if
                   end if
                 end if
               end if
@@ -507,6 +543,10 @@ contains
               if ((el_i .eq. nx_ - 1) .and. .not. transient) then
                 call calc_vorticity(C, C_far, P, bound)
                 call calc_vorticity(D_far, D, P, bound)
+                if (symmetry) then
+                  call calc_vorticity(C_far_sym, C_sym, P, bound)
+                  call calc_vorticity(D_sym, D_far_sym, P, bound)
+                end if
               end if
 
               mtx(cp_loc, el_loc, :) = bound
