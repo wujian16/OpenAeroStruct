@@ -22,7 +22,7 @@ from openmdao.devtools.partition_tree_n2 import view_tree
 # =============================================================================
 from geometry import GeometryMesh, Bspline, gen_crm_mesh, gen_rect_mesh
 from transfer import TransferDisplacements, TransferLoads
-from vlm import VLMStates, VLMFunctionals, VLMGeometry
+from vlm import VLMStates, VLMFunctionals, VLMGeometry, WakeGeometry
 from spatialbeam import SpatialBeamStates, SpatialBeamFunctionals, radii, SpatialBeamFEM, SpatialBeamDisp
 from materials import MaterialsTube
 from functionals import FunctionalBreguetRange, FunctionalEquilibrium
@@ -523,8 +523,12 @@ class OASProblem():
                 name = surface['name']
 
                 ts_group.add(name + 'geom',
-                         VLMGeometry(surface, t, dt, transient),
+                         VLMGeometry(surface, t, dt),
                          promotes=['v', 'alpha'])
+
+                ts_group.add(name + 'wake',
+                         WakeGeometry(surface, t, dt),
+                         promotes=['v'])
 
                 # Add a performance group for each surface
                 name = name + 'perf'
@@ -541,21 +545,20 @@ class OASProblem():
                 # 'aero_states' group.
                 if transient:
                     root.connect(name[:-1] + '.def_mesh', ts_group_name + name + 'geom.def_mesh')
-                    root.connect(ts_group_name + name + 'geom.wake_b_pts', ts_group_name + 'aero_states.' + name + 'wake_b_pts')
 
                     if t > 0:
-                        root.connect(ts_prev_name + name + 'geom.wake_b_pts', ts_group_name + name + 'geom.prev_wake_b_pts')
-                        root.connect(ts_prev_name + 'aero_states.' + name + 'wake_circ', ts_group_name + 'aero_states.' + name + 'prev_circ')
-
-
+                        root.connect(ts_prev_name + 'aero_states.' + name + 'last_circ', ts_group_name + 'aero_states.' + name + 'prev_circ')
+                        root.connect(ts_prev_name + name + 'wake.wake_mesh', ts_group_name + 'aero_states.' + name + 'prev_wake_mesh')
+                    if t > 1:
+                        root.connect(ts_prev_name + 'aero_states.' + name + 'wake_circ', ts_group_name + 'aero_states.' + name + 'prev_wake_circ')
 
                 else:
                     root.connect(name[:-1] + '.def_mesh', name + 'geom.def_mesh')
 
-
                 ts_group.connect(name + 'geom.def_mesh', 'aero_states.' + name + 'def_mesh')
                 ts_group.connect(name + 'geom.b_pts', 'aero_states.' + name + 'b_pts')
                 ts_group.connect(name + 'geom.c_pts', 'aero_states.' + name + 'c_pts')
+                ts_group.connect(name + 'geom.c_pts_inertial_frame', 'aero_states.' + name + 'c_pts_inertial_frame')
                 ts_group.connect(name + 'geom.normals', 'aero_states.' + name + 'normals')
                 ts_group.connect(name + 'geom.widths', 'aero_states.' + name + 'widths')
 
@@ -564,6 +567,8 @@ class OASProblem():
 
                 # Connect S_ref for performance calcs
                 ts_group.connect(name + 'geom.S_ref', name + 'perf.S_ref')
+                ts_group.connect(name + 'geom.starting_vortex', name + 'wake.starting_vortex')
+
 
             if transient:
                 exec('root.add("' + ts_group_name[:-1] + '", ts_group, promotes=["v", "alpha", "M", "Re", "rho"])')
@@ -594,7 +599,6 @@ class OASProblem():
             transient = False
         else:
             transient = True
-        t = 1
 
         # Loop over each surface in the surfaces list
         for surface in self.surfaces:

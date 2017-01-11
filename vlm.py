@@ -84,7 +84,8 @@ def _calc_vorticity(A, B, P):
            (r1_mag * r2_mag * (r1_mag * r2_mag + r1.dot(r2)))
 
 
-def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
+def _assemble_AIC_mtx(b_pts_name, c_pts_name, mtx, params, surfaces,
+                      transient, skip=False, wake=False):
     """
     Compute the aerodynamic influence coefficient matrix
     for either solving the linear system or solving for the drag.
@@ -138,20 +139,12 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
         # Variable names with a trailing underscore correspond to the lifting
         # surface being examined, not the collocation point
         name_ = surface_['name']
-
-        # Obtain the lifting surface mesh in the form expected by the solver,
-        # with shape [nx_, ny_, 3]
-        mesh = params[name_+'def_mesh']
-        if wake:
-            bpts = params[name_+'wake_b_pts']
-        else:
-            bpts = params[name_+'b_pts']
+        bpts = params[name_ + b_pts_name]
 
         # The shape of the bpts array will change for each timestep if we
         # have a transient case. If we have a steady-state case, nx_ and ny_
         # are equal to the values for num_x and num_y in the surface dict.
         nx_, ny_ = bpts.shape[:2]
-
         n_ = nx_ * ny_
         n_bpts_ = nx_ * ny_
         n_panels_ = (nx_ - 1) * (ny_ - 1)
@@ -164,23 +157,20 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
         for surface in surfaces:
             # These variables correspond to the collocation points
             name = surface['name']
-            nx = surface['num_x']
-            ny = surface['num_y']
-            n = nx * ny
-            n_bpts = nx * ny
-            n_panels = (nx - 1) * (ny - 1)
-            symmetry = surface['symmetry']
 
             # Obtain the collocation points used to compute the AIC mtx.
             # If setting up the AIC mtx, we use the collocation points (c_pts),
             # but if setting up the matrix to solve for drag, we use the
             # midpoints of the bound vortices.
-            if skip:
-                # Find the midpoints of the bound points, used in drag computations
-                pts = (params[name+'b_pts'][:-1, 1:, :] + \
-                    params[name+'b_pts'][:-1, :-1, :]) / 2
-            else:
-                pts = params[name+'c_pts']
+            pts = params[name + c_pts_name]
+
+            nx, ny = pts.shape[:2]
+            nx += 1
+            ny += 1
+            n = nx * ny
+            n_bpts = nx * ny
+            n_panels = (nx - 1) * (ny - 1)
+            symmetry = surface['symmetry']
 
             # Initialize sub-matrix to populate within full mtx
             small_mat = numpy.zeros((n_panels, n_panels_, 3), dtype='complex')
@@ -191,30 +181,22 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
                                                          skip, symmetry, transient)
             # Python matrix assembly
             else:
-                # Spanwise loop through vortex rings
-                for el_j in xrange(ny_ - 1):
-                    el_loc_j = el_j * (nx_ - 1)
+                # Chordwise loop through horseshoe elements in
+                # reversed order, starting with the panel closest
+                # to the leading edge. This is done to sum the
+                # AIC contributions from the side vortex filaments
+                # as we loop through the elements
+                for el_i in xrange(nx_ - 1):
+                    el_loc_i = el_i * (ny_ - 1)
 
-                    # Chordwise loop through horseshoe elements in
-                    # reversed order, starting with the panel closest
-                    # to the leading edge. This is done to sum the
-                    # AIC contributions from the side vortex filaments
-                    # as we loop through the elements
-                    for el_i in xrange(nx_ - 1):
-                        el_loc = el_i + el_loc_j
+                    # Spanwise loop through vortex rings
+                    for el_j in xrange(ny_ - 1):
+                        el_loc = el_loc_i + el_j
 
-                        A = bpts[el_i, el_j + 0, :]
-                        B = bpts[el_i, el_j + 1, :]
-
-                        # Check if this is the last panel; if so, use
-                        # the trailing edge mesh points for C & D, else
-                        # use the directly aft panel's bound points
-                        # for C & D
+                        A = bpts[el_i + 0, el_j + 0, :]
+                        B = bpts[el_i + 0, el_j + 1, :]
                         C = bpts[el_i + 1, el_j + 1, :]
                         D = bpts[el_i + 1, el_j + 0, :]
-                        if el_i == nx_ - 2:
-                            C_far = 1.e6 * u + C
-                            D_far = 1.e6 * u + D
 
                         if symmetry:
                             sym = numpy.array([1., -1., 1.])
@@ -222,78 +204,42 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
                             B_sym = B * sym
                             C_sym = C * sym
                             D_sym = D * sym
-                            if el_i == nx_ - 2:
-                                C_far_sym = C_far * sym
-                                D_far_sym = D_far * sym
 
-                        # Spanwise loop through control points
-                        for cp_j in xrange(ny - 1):
-                            cp_loc_j = cp_j * (nx - 1)
+                        # Chordwise loop through control points
+                        for cp_i in xrange(nx - 1):
+                            cp_loc_i = cp_i * (ny - 1)
 
-                            # Chordwise loop through control points
-                            for cp_i in xrange(nx - 1):
-                                cp_loc = cp_i + cp_loc_j
+                            # Spanwise loop through control points
+                            for cp_j in xrange(ny - 1):
+                                cp_loc = cp_loc_i + cp_j
 
                                 P = pts[cp_i, cp_j]
 
                                 gamma = 0.
                                 gamma += _calc_vorticity(B, C, P)
                                 gamma += _calc_vorticity(D, A, P)
+                                if skip:
+                                    if el_i == nx_ - 2:
+                                        gamma += _calc_vorticity(C, D, P)
+
+                                else:
+                                    gamma += _calc_vorticity(A, B, P)
+                                    gamma += _calc_vorticity(C, D, P)
+
                                 if symmetry:
                                     gamma += _calc_vorticity(C_sym, B_sym, P)
                                     gamma += _calc_vorticity(A_sym, D_sym, P)
 
-                                if not skip:
-                                    gamma += _calc_vorticity(A, B, P)
-                                    if symmetry:
-                                        gamma += _calc_vorticity(B_sym, A_sym, P)
-
-                                    if not wake:
-                                        if el_i < nx_ - 2:
-                                            gamma += _calc_vorticity(C, D, P)
-                                            if symmetry:
-                                                gamma += _calc_vorticity(D_sym, C_sym, P)
-                                    else:
-                                        gamma += _calc_vorticity(C, D, P)
-                                        if symmetry:
+                                    if skip:
+                                        if el_i == nx_ - 2:
                                             gamma += _calc_vorticity(D_sym, C_sym, P)
-
-                                else:
-                                    if el_loc == cp_loc:
-                                        pass
                                     else:
-                                        gamma += _calc_vorticity(A, B, P)
-                                        if symmetry:
-                                            gamma += _calc_vorticity(B_sym, A_sym, P)
-
-                                    if el_i + 1 == cp_i and el_j == cp_j:
-                                        pass
-                                    else:
-                                        if el_i < nx_-2:
-                                            gamma += _calc_vorticity(C, D, P)
-                                            if symmetry:
-                                                gamma += _calc_vorticity(D_sym, C_sym, P)
-
-                                if el_i == nx_ - 2 and not transient:
-                                    gamma += _calc_vorticity(C, C_far, P)
-                                    gamma += _calc_vorticity(D_far, D, P)
-                                    if symmetry:
-                                        gamma += _calc_vorticity(C_far_sym, C_sym, P)
-                                        gamma += _calc_vorticity(D_sym, D_far_sym, P)
-
-                                # gamma += _calc_vorticity(B, C, P)
-                                # gamma += _calc_vorticity(D, A, P)
-                                # gamma += _calc_vorticity(C, D, P)
-                                # gamma += _calc_vorticity(A, B, P)
-                                # if symmetry:
-                                #     gamma += _calc_vorticity(C_sym, B_sym, P)
-                                #     gamma += _calc_vorticity(A_sym, D_sym, P)
-                                #     gamma += _calc_vorticity(D_sym, C_sym, P)
-                                #     gamma += _calc_vorticity(B_sym, A_sym, P)
+                                        gamma += _calc_vorticity(B_sym, A_sym, P)
+                                        gamma += _calc_vorticity(D_sym, C_sym, P)
 
 
                                 # If skip, do not include the contributions
-                                # from the panel's bound vortex filament, as
+                                # from the panel's bound vortex filaments, as
                                 # this causes a singularity when we're taking
                                 # the influence of a panel on its own
                                 # collocation point. This true for the drag
@@ -302,7 +248,6 @@ def _assemble_AIC_mtx(mtx, params, surfaces, transient, skip=False, wake=False):
                                 # points.
                                 small_mat[cp_loc, el_loc, :] = gamma
 
-            # exit()
             # Populate the full-size matrix with these surface-surface AICs
             mtx[i_panels:i_panels+n_panels,
                 i_panels_:i_panels_+n_panels_, :] = small_mat
@@ -343,11 +288,10 @@ class VLMGeometry(Component):
 
     """
 
-    def __init__(self, surface, t, dt, transient):
+    def __init__(self, surface, t, dt):
         super(VLMGeometry, self).__init__()
 
         self.surface = surface
-        self.transient = transient
 
         ny = surface['num_y']
         nx = surface['num_x']
@@ -357,57 +301,106 @@ class VLMGeometry(Component):
         self.add_param('def_mesh', val=numpy.zeros((nx, ny, 3),
                        dtype="complex"))
 
-        if t > 0:
-            self.add_param('prev_wake_b_pts', val=numpy.zeros((t, ny, 3)))
-
         self.add_output('b_pts', val=numpy.zeros((nx, ny, 3),
                         dtype="complex"))
         self.add_output('c_pts', val=numpy.zeros((nx-1, ny-1, 3)))
+        self.add_output('c_pts_inertial_frame', val=numpy.zeros((nx-1, ny-1, 3)))
         self.add_output('widths', val=numpy.zeros((nx-1, ny-1)))
+        self.add_output('lengths', val=numpy.zeros((nx-1, ny-1)))
         self.add_output('normals', val=numpy.zeros((nx-1, ny-1, 3)))
         self.add_output('S_ref', val=0.)
-
-        self.add_output('wake_b_pts', val=numpy.zeros((t+1, ny, 3),
-                        dtype="complex"))
+        self.add_output('starting_vortex', val=numpy.zeros((1, ny, 3)))
 
         self.t = t
         self.dt = dt
+        self.nx = nx
+        self.ny = ny
 
         self.deriv_options['type'] = 'cs'
         self.deriv_options['form'] = 'central'
 
+    	self.all_lengths = numpy.zeros((nx - 1, ny), dtype="complex")
+
+    def get_lengths(self, A, B, axis):
+    	return numpy.sqrt(numpy.sum((B - A)**2, axis=axis))
+
     def solve_nonlinear(self, params, unknowns, resids):
+
+        # Create rotation vector based on the angle of attack, alpha.
+        # This rotation vector is used to rotate b_pts and c_pts based on the
+        # mesh and angle of attack.
+        alpha_conv = params['alpha'] * numpy.pi / 180.
+        cosa = numpy.cos(-alpha_conv)
+        sina = numpy.sin(-alpha_conv)
+        rot_x = numpy.array([cosa, 0, -sina])
+        rot_z = numpy.array([sina, 0,  cosa])
+
+        nx, ny = self.nx, self.ny
         mesh = params['def_mesh']
 
         b_pts = unknowns['b_pts']
+        b_unrot = b_pts.copy()
 
-        # Compute the bound points at 1/4 chord
-        b_pts[:-1, :, :] = mesh[:-1, :, :] * .75 + mesh[1:, :, :] * .25
+        # Compute the bound points at 1/4 chord, except for the last one.
+        # The last points cannot be computed because there are no mesh points
+        # past the trailing edge of the wing.
+        b_unrot[:-1, :, :] = mesh[:-1, :, :] * .75 + mesh[1:, :, :] * .25
 
-        # Populate the last row of b_pts with the extrapolated mesh
-        # May need to incorporate the timestep and velocity here like Gio
-        direction = mesh[-1, :, :] - mesh[-2, :, :]
-        norm = numpy.linalg.norm(direction, axis=1)
-        for ind in xrange(3):
-            direction[:, ind] /= norm
-        b_pts[-1, :, :] = .3 * params['v'] * self.dt * direction + mesh[-1, :, :]
+        # Instead we compute the chordwise distance for the final bound points
+        # using the flow conditions.
+        x_dist = .3 * params['v'] * self.dt
+
+        # The last bound points are this distance away from the trailing edge.
+        b_unrot[-1, :, :] = mesh[-1, :, :]
+        b_unrot[-1, :, 0] +=  + x_dist
+
+        # Rotate the bound points based on the angle of attack.
+        for i in xrange(nx):
+            for j in xrange(ny):
+                unknowns['b_pts'][i, j, 0] = b_unrot[i, j, :].dot(rot_x)
+            	unknowns['b_pts'][i, j, 1] = b_unrot[i, j, 1]
+            	unknowns['b_pts'][i, j, 2] = b_unrot[i, j, :].dot(rot_z)
 
         # Compute the collocation points at the midpoints of each
-        # panel's 3/4 chord line
-        c_pts = 0.5 * 0.25 * mesh[:-1, :-1, :] + \
-                0.5 * 0.75 * mesh[1:, :-1, :] + \
-                0.5 * 0.25 * mesh[:-1,  1:, :] + \
-                0.5 * 0.75 * mesh[1:,  1:, :]
+        # panel's 3/4 chord line.
+        c_unrot = 0.5 * 0.25 * mesh[:-1, :-1, :] + \
+                  0.5 * 0.75 * mesh[1:, :-1, :] + \
+                  0.5 * 0.25 * mesh[:-1,  1:, :] + \
+                  0.5 * 0.75 * mesh[1:,  1:, :]
 
-        # Compute the widths of each panel
-        widths = numpy.sqrt(numpy.sum((b_pts[:-1, 1:, :] - b_pts[:-1, :-1, :])**2, axis=2))
+        # Actually rotate the c_pts
+        for i in xrange(nx - 1):
+        	for j in xrange(ny - 1):
+        		unknowns['c_pts'][i, j, 0] = c_unrot[i, j, :].dot(rot_x)
+        		unknowns['c_pts'][i, j, 1] = c_unrot[i, j, 1]
+        		unknowns['c_pts'][i, j, 2] = c_unrot[i, j, :].dot(rot_z)
+
+        unknowns['starting_vortex'] = unknowns['b_pts'][-1, :, :]
+
+        v_freestream = numpy.zeros((nx-1, ny-1, 3))
+        v_freestream[:, :, 0] = params['v']
+
+        # Shift the c_pts in the negative direction based on the velocity
+        # at the wing. This velocity is just freestream velocity.
+        unknowns['c_pts_inertial_frame'] = unknowns['c_pts'] - v_freestream * self.dt * self.t
+
+        # Get lengths of panels, used later to compute forces
+        self.all_lengths[:-1, :] = self.get_lengths(b_unrot[1:-1, :, :], b_unrot[:-2, :, :], 2)
+
+        # The final length should be the chordwise length, same as other panels
+        self.all_lengths[-1, :] = self.get_lengths(mesh[-1, :, :] - b_unrot[-2, :, :], \
+                                     mesh[0, :, :] - b_unrot[0, :, :], 1)
+
+        # Save the averaged lengths to get lengths per panel
+        unknowns['lengths'] = (self.all_lengths[:, 1:] + self.all_lengths[:, :-1])/2
+
+        # Save the widths of each panel
+        unknowns['widths'] = self.get_lengths(b_unrot[:-1, 1:, :], b_unrot[:-1, :-1, :], 2)
 
         # Compute the normal of each panel by taking the cross-product of
         # its diagonals. Note that this could be a nonplanar surface
-        normals = numpy.cross(
-            mesh[:-1,  1:, :] - mesh[1:, :-1, :],
-            mesh[:-1, :-1, :] - mesh[1:,  1:, :],
-            axis=2)
+        normals = numpy.cross(b_pts[:-1,  1:, :] - b_pts[ 1:, :-1, :],
+                              b_pts[:-1, :-1, :] - b_pts[ 1:,  1:, :], axis=2)
 
         # Compute the area of the panels based on the normals.
         # Note that the area is computed from the normals based on the mesh.
@@ -421,38 +414,12 @@ class VLMGeometry(Component):
 
         # Normalize the normals based on their magnitudes.
         norms = numpy.sqrt(numpy.sum(normals**2, axis=2))
-
         for j in xrange(3):
             normals[:, :, j] /= norms
 
         # Store each array
         unknowns['S_ref'] = S_ref
-        unknowns['c_pts'] = c_pts
-        unknowns['widths'] = widths
         unknowns['normals'] = normals
-
-        ### END OF PREVIOUS GEOMETRY CALCULATIONS
-
-        ### START OF WAKE GEOMETRY CALCULATIONS
-
-        if self.t == 0:
-            old_wake = b_pts[-1, :, :]
-        else:
-            # change this for real
-            old_wake = params['prev_wake_b_pts']
-
-        alpha = params['alpha']*numpy.pi/180.
-        cosa = numpy.cos(alpha)
-        sina = numpy.sin(alpha)
-        freestream_direction = numpy.array([cosa, 0., sina])
-
-        distance = params['v'] * self.dt * freestream_direction
-
-        # Wake bound points only matter after t > 0.
-        # In the first timestep there is no wake.
-        unknowns['wake_b_pts'][1:, :, :] = old_wake + distance
-        unknowns['wake_b_pts'][0, :, :] = b_pts[-1, :, :]
-
 
 class VLMCirculations(Component):
     """
@@ -491,6 +458,7 @@ class VLMCirculations(Component):
         self.surfaces = surfaces
         self.transient = transient
         self.t = t
+        self.dt = dt
 
         for surface in surfaces:
             self.surface = surface
@@ -504,12 +472,25 @@ class VLMCirculations(Component):
                            dtype="complex"))
             self.add_param(name+'c_pts', val=numpy.zeros((nx-1, ny-1, 3),
                            dtype="complex"))
+            self.add_param(name+'c_pts_inertial_frame', val=numpy.zeros((nx-1, ny-1, 3),
+                           dtype="complex"))
             self.add_param(name+'normals', val=numpy.zeros((nx-1, ny-1, 3)))
-            self.add_param(name+'wake_b_pts', val=numpy.zeros((t+1, ny, 3),
-                            dtype="complex"))
 
+            size_wake = (ny - 1) * t
+            size = (ny - 1) * (nx - 1)
+            size_a1 = size_wake
             if t > 0:
                 self.add_param(name+'prev_circ', val=numpy.zeros((t, ny-1), dtype='complex'))
+                self.add_param(name+'prev_wake_mesh', val=numpy.zeros((t+1, ny, 3), dtype='complex'))
+                self.add_output(name+'wake_circ', val=numpy.zeros((t, ny-1), dtype='complex'))
+
+
+                self.wake_circ = numpy.zeros((size_wake), dtype="complex")
+            	self.v_wake = numpy.zeros((size, 3), dtype="complex")
+            	self.a1_mtx = numpy.zeros((size, size_a1, 3), dtype="complex")
+
+            if t > 1:
+                self.add_param(name+'prev_wake_circ', val=numpy.zeros((t-1, ny-1), dtype='complex'))
 
 
         self.add_param('v', val=0.)
@@ -524,16 +505,16 @@ class VLMCirculations(Component):
 
         self.add_state('circulations', val=numpy.zeros((tot_panels),
                        dtype="complex"))
+        self.add_output('v_wake_on_wing', val=numpy.zeros((tot_panels, tot_panels), dtype='complex'))
 
         self.AIC_mtx = numpy.zeros((tot_panels, tot_panels, 3),
                                    dtype="complex")
         self.mtx = numpy.zeros((tot_panels, tot_panels), dtype="complex")
         self.rhs = numpy.zeros((tot_panels), dtype="complex")
 
-    def _assemble_system(self, params):
-
+    def _assemble_system(self, params, unknowns):
         # Actually assemble the AIC matrix for the wing
-        _assemble_AIC_mtx(self.AIC_mtx, params, self.surfaces, self.transient)
+        _assemble_AIC_mtx('b_pts', 'c_pts', self.AIC_mtx, params, self.surfaces, self.transient)
 
         # Construct an flattend array with the normals of each surface in order
         # so we can do the normals with velocities to set up the right-hand-side
@@ -546,19 +527,28 @@ class VLMCirculations(Component):
             num_panels = (nx - 1) * (ny - 1)
             flattened_normals[i:i+num_panels, :] = params[name+'normals'].reshape(-1, 3, order='C')
 
-            if self.t > 0:
-                # mult! change size of matrix
-                wake_mtx = numpy.zeros((num_panels, self.t*(ny-1), 3), dtype='complex')
+            if self.t == 1:
+                unknowns[name+'wake_circ'] = params[name+'prev_circ']
 
-                # Actually assemble the AIC matrix for the wake on the wing
-                _assemble_AIC_mtx(wake_mtx, params, self.surfaces, self.transient, wake=True)
-
-                circ = params[name+'prev_circ'].reshape(-1, order='C')
-                v_ind_wake = numpy.zeros((num_panels, 3))
-                for ind in xrange(3):
-                    v_ind_wake[:, ind] = wake_mtx[:, :, ind].dot(circ)
+            if self.t > 1:
+                unknowns[name+'wake_circ'][0, :] = params[name+'prev_circ'][-1, :]
+                unknowns[name+'wake_circ'][1:, :] = params[name+'prev_wake_circ']
 
             i += num_panels
+
+        if self.t > 0:
+            # The inertial frame is body-fixed.
+            # Therefore we must update the points based on the velocities.
+
+            # a1_mtx is the matrix used to get the induced velocities on the wing from the wake.
+            # This uses the wake_mesh which is really the b_pts for the wake
+            _assemble_AIC_mtx('prev_wake_mesh', 'c_pts_inertial_frame', self.a1_mtx, params, self.surfaces, self.transient, wake=True)
+
+            # Dot the matrix with the wake circulations to get the induced velocity
+            # on the wing from the wake.
+            # This is used to set the RHS of the system to solve for the new circulations.
+            for ind in xrange(3):
+                unknowns['v_wake_on_wing'][:, ind] = self.a1_mtx[:, :, ind].dot(unknowns[name+'wake_circ'][0])
 
         # Construct a matrix that is the AIC_mtx dotted by the normals at each
         # collocation point. This is used to compute the circulations
@@ -566,34 +556,26 @@ class VLMCirculations(Component):
         for ind in xrange(3):
             self.mtx[:, :] += (self.AIC_mtx[:, :, ind].T * flattened_normals[:, ind]).T
 
-        # Obtain the freestream velocity direction and magnitude by taking
-        # alpha into account
-        alpha = params['alpha'] * numpy.pi / 180.
-        cosa = numpy.cos(alpha)
-        sina = numpy.sin(alpha)
-        v = params['v'] * numpy.array([cosa, 0., sina], dtype="complex")
-
         # Populate the right-hand side of the linear system with the
         # expected velocities at each collocation point
-        v_vec = numpy.ones((self.rhs.shape[0], 3)) * v
-        self.rhs[:] = -flattened_normals.reshape(-1, 3, order='C').dot(v)
-        if self.t > 0:
-            v_vec += v_ind_wake
-            self.rhs[:] = -numpy.sum(flattened_normals.reshape(-1, 3, order='C') * (v_vec), axis=1)
-        else:
-            self.rhs[:] = -flattened_normals.reshape(-1, 3, order='C').dot(v)
+        v_c_pts = numpy.zeros((self.rhs.shape[0], 3), order='C')
+        v_c_pts[:, ::3] = params['v']
+
+        # Reshape the normals so that we can correctly produce the rhs
+        norm = params[name+'normals'].reshape(-1, 3, order='C')
+
+        # Populate the rhs vector
+        self.rhs = numpy.sum(-norm * v_c_pts, axis=1)
 
 
     def solve_nonlinear(self, params, unknowns, resids):
         """ Solve the linear system to obtain circulations. """
-        self._assemble_system(params)
+        self._assemble_system(params, unknowns)
         unknowns['circulations'] = numpy.linalg.solve(self.mtx, self.rhs)
-        print 'circ'
-        print unknowns['circulations']
 
     def apply_nonlinear(self, params, unknowns, resids):
         """ Compute the residuals of the linear system. """
-        self._assemble_system(params)
+        self._assemble_system(params, unknowns)
 
         circ = unknowns['circulations']
         resids['circulations'] = self.mtx.dot(circ) - self.rhs
@@ -631,6 +613,71 @@ class VLMCirculations(Component):
         for voi in vois:
             sol_vec[voi].vec[:] = lu_solve(self.lup, rhs_vec[voi].vec, trans=t)
 
+class WakeGeometry(Component):
+    """ Update position of wake mesh in the body frame, adding a line for each time step
+    'wake_mesh_' + str(nt) = position of wake mesh points (wake rings corners), at the time step t+1 """
+
+    def __init__(self, surface, t, dt):
+    	super(WakeGeometry, self).__init__()
+
+        nx = surface['num_x']
+        ny = surface['num_y']
+
+    	nt = t + 1
+
+    	self.add_param('v', val=10.)
+        self.add_param('starting_vortex', val=numpy.zeros((1, ny, 3), dtype="complex"))
+    	self.add_output('wake_mesh', val=numpy.zeros((t+2, ny, 3), dtype="complex"))
+
+    	size_wake_mesh = ny * t
+
+    	if t > 0:
+    		self.add_param('v_wakewing_on_wake', val=numpy.zeros((size_wake_mesh, 3), dtype="complex"))
+    		self.add_param('prev_wake_mesh', val=numpy.zeros((t+1, ny, 3), dtype="complex"))
+
+    	self.deriv_options['form'] = 'central'
+
+    	self.ny = ny
+    	self.t = t
+        self.dt = dt
+
+    	self.v_wakewing_on_wake_resh = numpy.zeros((t, ny, 3), dtype="complex")
+    	self.new_wake_row = numpy.zeros((1, ny, 3), dtype="complex")
+    	self.old_wake = numpy.zeros((t+1, ny, 3), dtype="complex")
+
+    def solve_nonlinear(self, params, unknowns, resids):
+
+        ny = self.ny
+        t = self.t
+
+        # Reshape of v_wakewing_on_wake so it can easily be applied to the wake mesh
+        if t > 0:
+        	for ind in xrange(3):
+        		self.v_wakewing_on_wake_resh[:, :, ind] = params['v_wakewing_on_wake'][:, ind].reshape(t, ny, order='C')
+
+        # Set old_wake based on if this is the first timestep or subsequent ones
+        if t == 0:
+            self.old_wake = params['starting_vortex']
+        else:
+            self.old_wake = params['prev_wake_mesh']
+
+            # Here we apply the reshaped induced velocity on the wake caused by
+            # the wing and the wake to the wake mesh.
+            # This gives us the wake mesh from the third row to the end.
+            unknowns['wake_mesh'][2:(t+2), :, :] = self.old_wake[1:(t+1), :, :] \
+                                                   + self.v_wakewing_on_wake_resh * self.dt
+            unknowns['wake_mesh'][(t+2):, :, :] = self.old_wake[(t+1):, :, :]
+
+        # Update the second wake_mesh row
+        unknowns['wake_mesh'][1, :, :] = self.old_wake[0, :, :]
+
+        # Addition of a new wake row
+        self.new_wake_row = params['starting_vortex']
+        self.new_wake_row[0, :, 0] -= params['v'] * self.dt * (t+1)
+
+        # Set the first wake_mesh row based on the starting vortex and the distance
+        # traveled since then.
+        unknowns['wake_mesh'][0, :, :] = self.new_wake_row
 
 class VLMForces(Component):
     """ Compute aerodynamic forces acting on each section.
@@ -677,9 +724,10 @@ class VLMForces(Component):
 
             self.add_param(name+'def_mesh', val=numpy.zeros((nx, ny, 3), dtype='complex'))
             self.add_param(name+'b_pts', val=numpy.zeros((nx, ny, 3), dtype='complex'))
+            self.add_param(name+'c_pts', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
             self.add_param(name+'widths', val=numpy.zeros((nx-1, ny-1), dtype='complex'))
             self.add_output(name+'sec_forces', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
-            self.add_output(name+'wake_circ', val=numpy.zeros((t+1, ny-1), dtype='complex'))
+            self.add_output(name+'last_circ', val=numpy.zeros((t+1, ny-1), dtype='complex'))
 
             if t > 0:
                 self.add_param(name+'prev_circ', val=numpy.zeros((t, ny-1), dtype='complex'))
@@ -709,7 +757,7 @@ class VLMForces(Component):
         # Assemble a different matrix here than the AIC_mtx from above; Note
         # that the collocation points used here are the midpoints of each
         # bound vortex filament, not the collocation points from above
-        _assemble_AIC_mtx(self.mtx, params, self.surfaces, self.transient, skip=True)
+        # _assemble_AIC_mtx(self.mtx, params, self.surfaces, self.transient, skip=True)
 
         # Compute the induced velocities at the midpoints of the
         # bound vortex filaments
@@ -735,12 +783,12 @@ class VLMForces(Component):
             # Cross the obtained velocities with the bound vortex filament
             # vectors
             cross = numpy.cross(self.v[i:i+num_panels],
-                                bound.reshape(-1, bound.shape[-1], order='F'))
+                                bound.reshape(-1, bound.shape[-1], order='C'))
 
             sec_forces = numpy.zeros((num_panels, 3), dtype='complex')
 
-            circ_slice = circ[i:i+num_panels].reshape(nx-1, ny-1, order='F')
-            cross_slice = cross.reshape(nx-1, ny-1, 3, order='F')
+            circ_slice = circ[i:i+num_panels].reshape(nx-1, ny-1, order='C')
+            cross_slice = cross.reshape(nx-1, ny-1, 3, order='C')
 
             # Compute the sectional forces acting on each panel
             for ind in xrange(3):
@@ -753,11 +801,9 @@ class VLMForces(Component):
 
             unknowns[name+'sec_forces'] = params['rho'] * sec_forces.reshape((nx-1, ny-1, 3), order='C')
 
-            print unknowns[name+'sec_forces']
-
-            unknowns[name+'wake_circ'][0, :] = circ_slice[-1, :]
+            unknowns[name+'last_circ'][0, :] = circ_slice[-1, :]
             if self.t > 0:
-                unknowns[name+'wake_circ'][1:, :] = params[name+'prev_circ']
+                unknowns[name+'last_circ'][1:, :] = params[name+'prev_circ']
 
             i += num_panels
 
