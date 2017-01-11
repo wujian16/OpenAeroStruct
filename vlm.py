@@ -505,7 +505,7 @@ class VLMCirculations(Component):
 
         self.add_state('circulations', val=numpy.zeros((tot_panels),
                        dtype="complex"))
-        self.add_output('v_wake_on_wing', val=numpy.zeros((tot_panels, tot_panels), dtype='complex'))
+        self.add_output('v_wake_on_wing', val=numpy.zeros((tot_panels, 3), dtype='complex'))
 
         self.AIC_mtx = numpy.zeros((tot_panels, tot_panels, 3),
                                    dtype="complex")
@@ -612,6 +612,90 @@ class VLMCirculations(Component):
 
         for voi in vois:
             sol_vec[voi].vec[:] = lu_solve(self.lup, rhs_vec[voi].vec, trans=t)
+
+class InducedVelocities(Component):
+    """ Define induced velocities acting on each wing (v) or wake (w) panel
+    'v_wing_on_wing_' + str(t) = velocity of c_pts (wing panels) induced by wing panels, at the time step t
+    'v_wakewing_on_wake_' + str(t) = velocity of wake_mesh (wake points) induced by wing and wake panels, at the time step t """
+
+    def __init__(self, surfaces, transient, t, dt):
+        super(InducedVelocities, self).__init__()
+
+        self.surfaces = surfaces
+        self.transient = transient
+        self.t = t
+        self.dt = t
+
+        self.add_param('v', val=10.)
+        self.add_param('dt', val=0.1)
+        size = (nx-1) * (n-1)
+        self.add_param('circ_' + str(t), val=numpy.zeros((size), dtype="complex"))
+        self.add_output('v_wing_on_wing_' + str(t), val=numpy.zeros((size, 3), dtype="complex"))
+
+        size_wake_mesh = n * t
+        size_a3 = (n-1) * t
+
+        # Only need wake induced velocity if it exists
+        if t > 0:
+        	size_wake = (n-1) * t
+        	self.add_param('circ_wake_' + str(t), val=numpy.zeros((size_wake), dtype="complex"))
+        	self.add_param('wake_mesh_' + str(t), val=numpy.zeros((t+1, n, 3), dtype="complex"))
+        	self.add_output('v_wakewing_on_wake_' + str(t), val=numpy.zeros((size_wake_mesh, 3), dtype="complex"))
+
+        	self.w_wake = numpy.zeros((size_wake_mesh, 3), dtype="complex")
+        	self.a3_mtx = numpy.zeros((size_wake_mesh, size_a3, 3), dtype="complex")
+
+        self.v_wing = numpy.zeros((size, 3), dtype="complex")
+        self.w_wing = numpy.zeros((size_wake_mesh, 3), dtype="complex")
+        self.a2_mtx = numpy.zeros((size_wake_mesh, size, 3), dtype="complex")
+
+        # Cap the size of the wake mesh based on the desired number of wake rows
+        if t < nw:
+        	self.wake_mesh_local_frame = numpy.zeros((t+1, n, 3), dtype="complex")
+        else:
+        	self.wake_mesh_local_frame = numpy.zeros((nw+1, n, 3), dtype="complex")
+
+        self.a_mtx = numpy.zeros((size, size, 3), dtype="complex")
+        self.b_mtx = numpy.zeros((size, size, 3), dtype="complex")
+
+    def solve_nonlinear(self, params, unknowns, resids):
+
+        b_AIC_mtx = _assemble_AIC_mtx('b_pts', 'c_pts', self.a_mtx, params, self.surfaces, self.transient, skip=True)
+
+        # Obtain the induced velocity on the wing caused by the wing
+        # by using the b_mtx previously obtained.
+        # We currently do this in OAS too.
+        for ind in xrange(3):
+        	self.v_wing[:, ind] = b_AIC_mtx[:, :, ind].dot(params['circ_' + str(t)])
+
+        # Induced velocity on wing caused by wing
+        unknowns['v_wing_on_wing_' + str(t)] = self.v_wing
+
+        # Wake rollup (w)
+        if t > 0:
+            # Translate the wake mesh into the local frame
+            translation = numpy.array([params['v'] * params['dt'] * t, 0., 0.])
+            self.wake_mesh_local_frame = params['wake_mesh_' + str(t)] + translation
+
+            # params['wake_mesh_' + str(t)] doesn't change with each timestep
+            # but self.wake_mesh_local_frame does change with each timestep
+
+            # Assemble a2_mtx which is used to calculate the wing induced velocity
+            # caused by the wake
+            self.a2_mtx, _ = _assemble_AIC_mtx(params['b_pts_' + str(t)], self.wake_mesh_local_frame[1:,:,], self.a2_mtx)
+
+            # Assemble a3_mtx which is used to calculate the wake induced velocity
+            # caused by the wake
+            self.a3_mtx, _ = _assemble_AIC_mtx(params['wake_mesh_' + str(t)][:(t+1), :, :],
+                                  params['wake_mesh_' + str(t)][1:(t+1), :, :], self.a3_mtx)
+
+            # Obtain the induced velocities on the wake caused by the wing and the wake
+            for ind in xrange(3):
+            	self.w_wing[:, ind] = self.a2_mtx[:, :, ind].dot(params['circ_' + str(t)])
+            	self.w_wake[:, ind] = self.a3_mtx[:, :, ind].dot(params['circ_wake_' + str(t)][:t*(n-1)])
+
+            # Induced velocity on the wake caused by wing and wake
+            unknowns['v_wakewing_on_wake_' + str(t)] = self.w_wing + self.w_wake
 
 class WakeGeometry(Component):
     """ Update position of wake mesh in the body frame, adding a line for each time step
