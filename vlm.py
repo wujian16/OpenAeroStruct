@@ -492,7 +492,8 @@ class VLMCirculations(Component):
 
         self.add_state('circulations', val=numpy.zeros((tot_panels),
                        dtype="complex"))
-        self.add_output('v_wake_on_wing', val=numpy.zeros((tot_panels, 3), dtype='complex'))
+        if t > 0:
+            self.add_output('v_wake_on_wing', val=numpy.zeros((tot_panels, 3), dtype='complex'))
 
         self.AIC_mtx = numpy.zeros((tot_panels, tot_panels, 3),
                                    dtype="complex")
@@ -814,6 +815,8 @@ class VLMForces(Component):
             self.add_param(name+'b_pts', val=numpy.zeros((nx, ny, 3), dtype='complex'))
             self.add_param(name+'c_pts', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
             self.add_param(name+'widths', val=numpy.zeros((nx-1, ny-1), dtype='complex'))
+            self.add_param(name+'normals', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
+            self.add_param(name+'lengths', val=numpy.zeros((nx-1, ny-1)))
             self.add_output(name+'sec_forces', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
 
         self.tot_panels = tot_panels
@@ -821,65 +824,73 @@ class VLMForces(Component):
         self.add_param('alpha', val=3.)
         self.add_param('v', val=10.)
         self.add_param('rho', val=3.)
+        self.add_output('sigma', val=numpy.zeros((nx-1, ny-1), dtype='complex'))
 
         self.add_param('v_wing_on_wing', val=numpy.zeros((tot_panels, 3), dtype="complex"))
         if t > 0:
             self.add_param('v_wake_on_wing', val=numpy.zeros((tot_panels, 3), dtype='complex'))
+            self.add_param('prev_sigma', val=numpy.zeros((nx-1, ny-1), dtype='complex'))
 
         self.surfaces = surfaces
         self.transient = transient
 
         self.mtx = numpy.zeros((tot_panels, tot_panels, 3), dtype="complex")
-        self.v = numpy.zeros((tot_panels, 3), dtype="complex")
+        self.loc_circ = numpy.zeros((nx-1, ny-1), dtype="complex")
         self.t = t
+        self.dt = dt
 
         self.deriv_options['type'] = 'fd'
         self.deriv_options['form'] = 'central'
 
     def solve_nonlinear(self, params, unknowns, resids):
-        circ = params['circulations']
-        alpha = params['alpha'] * numpy.pi / 180.
-        cosa = numpy.cos(alpha)
-        sina = numpy.sin(alpha)
+        nx, ny = self.surfaces[0]['num_x'], self.surfaces[0]['num_y']
 
-        self.v = params['v_wing_on_wing']
+        velo = numpy.zeros((nx-1, ny-1, 3))
 
-        self.v[:, 0] += params['v']
+        velo[:, :,  0] += params['v']
+        vind = params['v_wing_on_wing'][:, 2].reshape(nx-1, ny-1, order='C')
 
         if self.t > 0:
-            self.v += params['v_wake_on_wing']
-
-        i = 0
-        for surface in self.surfaces:
-            name = surface['name']
-            nx = surface['num_x']
-            ny = surface['num_y']
-            num_panels = (nx - 1) * (ny - 1)
-
-            b_pts = params[name+'b_pts']
-
-            bound = b_pts[:-1, 1:, :] - b_pts[:-1, :-1, :]
-
-            # Cross the obtained velocities with the bound vortex filament
-            # vectors
-            cross = numpy.cross(self.v[i:i+num_panels],
-                                bound.reshape(-1, bound.shape[-1], order='C'))
-
-            sec_forces = numpy.zeros((num_panels, 3), dtype='complex')
-
-            circ_slice = circ[i:i+num_panels].reshape(nx-1, ny-1, order='C')
-            cross_slice = cross.reshape(nx-1, ny-1, 3, order='C')
-
-            # Compute the sectional forces acting on each panel
             for ind in xrange(3):
-                sec_forces[:ny-1, ind] = circ_slice[0, :] * cross_slice[0, :, ind]
+                velo[:, :, ind] += params['v_wake_on_wing'][:, ind].reshape(nx-1, ny-1, order='C')
 
-                for j in xrange(1, nx - 1):
-                    sec_forces[j*(ny-1):(j+1)*(ny-1), ind] = \
-                        (circ_slice[j, :] - circ_slice[j-1, :]) * cross_slice[j, :, ind]
+            vind += params['v_wake_on_wing'][:, 2].reshape(nx-1, ny-1, order='C')
 
-            unknowns[name+'sec_forces'] = params['rho'] * sec_forces.reshape((nx-1, ny-1, 3), order='C')
-            i += num_panels
+        # Reshape the circulations into a matrix so we can more easily manipulate the values
+        circ_mtx = params['circulations'].reshape(nx-1, ny-1, order='C')
+
+        # For the first row of circulations, use the values.
+        # For all other rows, use the difference between that value and the previous value.
+        # This is necessary when using vortex rings to get the correct effects.
+        self.loc_circ[0, :] = circ_mtx[0, :]
+        self.loc_circ[1:, :] = circ_mtx[1:, :] - circ_mtx[:-1, :]
+
+        # Velocity-potential time derivative (dCirc_dt) is obtained by integrating
+        # from the leading edge
+        unknowns['sigma'] = 0.5 * self.loc_circ
+        unknowns['sigma'][1:, :] += circ_mtx[:-1, :]
+        unknowns['sigma'] *= params['wing_lengths']
+
+        # Obtain the change in circulation per timestep
+        if self.t == 0:
+        	dCirc_dt = unknowns['sigma'] / self.dt
+        else:
+            dCirc_dt = (unknowns['sigma'] - params['prev_sigma']) / self.dt
+
+        # Lift for each panel
+        forces_L = (velo[:, :, 0] * self.loc_circ + dCirc_dt) * params['wing_widths'] * params['wing_normals'][:, :, 2] * params['rho']
+
+        # Induced drag for each panel
+        forces_D = params['wing_widths'] * (-vind * self.loc_circ + dCirc_dt * params['wing_normals'][:, :, 0]) * params['rho']
+
+        # section forces for structural part
+        projected_forces = numpy.array(params['wing_normals'], dtype="complex")
+        for ind in xrange(3):
+        	projected_forces[:, :, ind] *= forces_L
+
+        unknowns['wing_sec_forces'] = numpy.zeros((nx-1, ny-1, 3))
+
+        print "L: {},  D: {}".format(numpy.sum(forces_L).real, numpy.sum(forces_D).real)
 
 
 class VLMLiftDrag(Component):
@@ -1040,6 +1051,9 @@ class VLMStates(Group):
         self.add('circulations',
                  VLMCirculations(surfaces, transient, t, dt),
                  promotes=['*'])
+        self.add('ind_vel',
+              InducedVelocities(surfaces, t, dt, transient),
+              promotes=['*'])
         self.add('forces',
                  VLMForces(surfaces, transient, t, dt),
                  promotes=['*'])

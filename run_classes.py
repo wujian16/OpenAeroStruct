@@ -515,10 +515,6 @@ class OASProblem():
                      VLMStates(self.surfaces, t, dt, transient),
                      promotes=['v', 'alpha', 'rho'])
 
-            ts_group.add('ind_vel',
-                     InducedVelocities(self.surfaces, t, dt, transient),
-                     promotes=['v', 'alpha'])
-
             # Loop over each surface in the surfaces list
             for surface in self.surfaces:
 
@@ -550,19 +546,15 @@ class OASProblem():
                 if transient:
                     root.connect(name[:-1] + '.def_mesh', ts_group_name + name + 'geom.def_mesh')
 
-                    root.connect(ts_group_name + 'aero_states.circulations', ts_group_name + 'ind_vel.circulations')
-
                     if t > 0:
                         root.connect(ts_prev_name + 'aero_states.circulations', ts_group_name + 'aero_states.' + name + 'prev_circ')
                         root.connect(ts_prev_name + name + 'wake.wake_mesh', ts_group_name + name + 'wake.prev_wake_mesh')
                         root.connect(ts_prev_name + name + 'wake.wake_mesh', ts_group_name + 'aero_states.' + name + 'prev_wake_mesh')
 
-                        root.connect(ts_prev_name + name + 'wake.wake_mesh', ts_group_name + 'ind_vel.' + name + 'wake_mesh')
-                        root.connect(ts_prev_name + name + 'wake.wake_mesh_local_frame', ts_group_name + 'ind_vel.' + name + 'wake_mesh_local_frame')
+                        root.connect(ts_prev_name + name + 'wake.wake_mesh', ts_group_name + 'aero_states.' + name + 'wake_mesh')
+                        root.connect(ts_prev_name + name + 'wake.wake_mesh_local_frame', ts_group_name + 'aero_states.' + name + 'wake_mesh_local_frame')
 
-                        root.connect(ts_group_name + 'ind_vel.v_wakewing_on_wake', ts_group_name + name + 'wake.v_wakewing_on_wake')
-
-                        root.connect(ts_group_name + 'aero_states.' + name + 'wake_circ', ts_group_name + 'ind_vel.wake_circ')
+                        root.connect(ts_prev_name + 'aero_states.sigma', ts_group_name + 'aero_states.prev_sigma')
 
                     if t > 1:
                         root.connect(ts_prev_name + 'aero_states.' + name + 'wake_circ', ts_group_name + 'aero_states.' + name + 'prev_wake_circ')
@@ -570,12 +562,16 @@ class OASProblem():
                 else:
                     root.connect(name[:-1] + '.def_mesh', name + 'geom.def_mesh')
 
+                if t > 1:
+                    ts_group.connect('aero_states.v_wakewing_on_wake', 'wake.v_wakewing_on_wake')
+
                 # ts_group.connect(name + 'geom.def_mesh', 'aero_states.' + name + 'def_mesh')
                 ts_group.connect(name + 'geom.b_pts', 'aero_states.' + name + 'b_pts')
                 ts_group.connect(name + 'geom.c_pts', 'aero_states.' + name + 'c_pts')
                 ts_group.connect(name + 'geom.c_pts_inertial_frame', 'aero_states.' + name + 'c_pts_inertial_frame')
                 ts_group.connect(name + 'geom.normals', 'aero_states.' + name + 'normals')
-                # ts_group.connect(name + 'geom.widths', 'aero_states.' + name + 'widths')
+                ts_group.connect(name + 'geom.widths', 'aero_states.' + name + 'widths')
+                ts_group.connect(name + 'geom.lengths', 'aero_states.' + name + 'lengths')
 
                 # Connect the results from 'aero_states' to the performance groups
                 ts_group.connect('aero_states.' + name + 'sec_forces', name + 'perf.sec_forces')
@@ -584,9 +580,6 @@ class OASProblem():
                 ts_group.connect(name + 'geom.S_ref', name + 'perf.S_ref')
 
                 ts_group.connect(name + 'geom.starting_vortex', name + 'wake.starting_vortex')
-
-                ts_group.connect(name + 'geom.b_pts', 'ind_vel.' + name + 'b_pts')
-                ts_group.connect(name + 'geom.c_pts', 'ind_vel.' + name + 'c_pts')
 
             if transient:
                 exec('root.add("' + ts_group_name[:-1] + '", ts_group, promotes=["v", "alpha", "M", "Re", "rho"])')
