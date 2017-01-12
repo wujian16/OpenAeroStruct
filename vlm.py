@@ -55,33 +55,23 @@ def norm(vec):
 
 
 def _calc_vorticity(A, B, P):
-    """ Calculates the influence coefficient for a vortex filament.
+	""" Define the vorticity induced by the segment AB to P """
+	rAP = P - A
+	rBP = P - B
+	rAP_len = norm(rAP)
+	rBP_len = norm(rBP)
+	cross = numpy.cross(rAP, rBP)
+	may = numpy.sum(cross**2)
 
-    Parameters
-    ----------
-    A[3] : array_like
-        Coordinates for the start point of the filament.
-    B[3] : array_like
-        Coordinates for the end point of the filament.
-    P[3] : array_like
-        Coordinates for the collocation point where the influence coefficient
-        is computed.
+    # Cutoff to avoid singularity on b_pts, I think when collocation is on
+    # a vortex
+	r_cut = 1e-10
+	cond = any([rAP_len < r_cut, rBP_len < r_cut, may < r_cut])
+	if cond:
+		return numpy.array([0., 0., 0.])
 
-    Returns
-    -------
-    out[3] : array_like
-        Influence coefficient contribution for the described filament.
-
-    """
-
-    r1 = P - A
-    r2 = P - B
-
-    r1_mag = norm(r1)
-    r2_mag = norm(r2)
-
-    return (r1_mag + r2_mag) * numpy.cross(r1, r2) / \
-           (r1_mag * r2_mag * (r1_mag * r2_mag + r1.dot(r2)))
+	return (rAP_len + rBP_len) * cross / \
+           (rAP_len * rBP_len * (rAP_len * rBP_len + rAP.dot(rBP)))
 
 
 def _assemble_AIC_mtx(b_pts_name, c_pts_name, mtx, params, surfaces,
@@ -162,7 +152,10 @@ def _assemble_AIC_mtx(b_pts_name, c_pts_name, mtx, params, surfaces,
             # If setting up the AIC mtx, we use the collocation points (c_pts),
             # but if setting up the matrix to solve for drag, we use the
             # midpoints of the bound vortices.
-            pts = params[name + c_pts_name]
+            if c_pts_name == 'wake_mesh_local_frame' or c_pts_name == 'wake_mesh':
+                pts = params[name + c_pts_name][1:, :, :]
+            else:
+                pts = params[name + c_pts_name]
 
             nx, ny = pts.shape[:2]
             nx += 1
@@ -237,7 +230,6 @@ def _assemble_AIC_mtx(b_pts_name, c_pts_name, mtx, params, surfaces,
                                         gamma += _calc_vorticity(B_sym, A_sym, P)
                                         gamma += _calc_vorticity(D_sym, C_sym, P)
 
-
                                 # If skip, do not include the contributions
                                 # from the panel's bound vortex filaments, as
                                 # this causes a singularity when we're taking
@@ -249,8 +241,7 @@ def _assemble_AIC_mtx(b_pts_name, c_pts_name, mtx, params, surfaces,
                                 small_mat[cp_loc, el_loc, :] = gamma
 
             # Populate the full-size matrix with these surface-surface AICs
-            mtx[i_panels:i_panels+n_panels,
-                i_panels_:i_panels_+n_panels_, :] = small_mat
+            mtx[i_panels:i_panels+n_panels, i_panels_:i_panels_+n_panels_, :] = small_mat
 
             i += n
             i_bpts += n_bpts
@@ -460,14 +451,17 @@ class VLMCirculations(Component):
         self.t = t
         self.dt = dt
 
+        tot_panels = 0
+        for surface in surfaces:
+            tot_panels += (surface['num_x'] - 1) * (surface['num_y'] - 1)
+        self.tot_panels = tot_panels
+
         for surface in surfaces:
             self.surface = surface
             ny = surface['num_y']
             nx = surface['num_x']
             name = surface['name']
 
-            self.add_param(name+'def_mesh', val=numpy.zeros((nx, ny, 3),
-                           dtype="complex"))
             self.add_param(name+'b_pts', val=numpy.zeros((nx, ny, 3),
                            dtype="complex"))
             self.add_param(name+'c_pts', val=numpy.zeros((nx-1, ny-1, 3),
@@ -480,10 +474,9 @@ class VLMCirculations(Component):
             size = (ny - 1) * (nx - 1)
             size_a1 = size_wake
             if t > 0:
-                self.add_param(name+'prev_circ', val=numpy.zeros((t, ny-1), dtype='complex'))
+                self.add_param(name+'prev_circ', val=numpy.zeros((tot_panels), dtype='complex'))
                 self.add_param(name+'prev_wake_mesh', val=numpy.zeros((t+1, ny, 3), dtype='complex'))
                 self.add_output(name+'wake_circ', val=numpy.zeros((t, ny-1), dtype='complex'))
-
 
                 self.wake_circ = numpy.zeros((size_wake), dtype="complex")
             	self.v_wake = numpy.zeros((size, 3), dtype="complex")
@@ -492,16 +485,10 @@ class VLMCirculations(Component):
             if t > 1:
                 self.add_param(name+'prev_wake_circ', val=numpy.zeros((t-1, ny-1), dtype='complex'))
 
-
         self.add_param('v', val=0.)
         self.add_param('alpha', val=0.)
 
         self.deriv_options['linearize'] = True  # only for circulations
-
-        tot_panels = 0
-        for surface in surfaces:
-            tot_panels += (surface['num_x'] - 1) * (surface['num_y'] - 1)
-        self.tot_panels = tot_panels
 
         self.add_state('circulations', val=numpy.zeros((tot_panels),
                        dtype="complex"))
@@ -513,6 +500,8 @@ class VLMCirculations(Component):
         self.rhs = numpy.zeros((tot_panels), dtype="complex")
 
     def _assemble_system(self, params, unknowns):
+
+        print 'time step ', self.t
         # Actually assemble the AIC matrix for the wing
         _assemble_AIC_mtx('b_pts', 'c_pts', self.AIC_mtx, params, self.surfaces, self.transient)
 
@@ -528,10 +517,10 @@ class VLMCirculations(Component):
             flattened_normals[i:i+num_panels, :] = params[name+'normals'].reshape(-1, 3, order='C')
 
             if self.t == 1:
-                unknowns[name+'wake_circ'] = params[name+'prev_circ']
+                unknowns[name+'wake_circ'] = params[name+'prev_circ'][(nx-2)*(ny-1):]
 
             if self.t > 1:
-                unknowns[name+'wake_circ'][0, :] = params[name+'prev_circ'][-1, :]
+                unknowns[name+'wake_circ'][0, :] = params[name+'prev_circ'][(nx-2)*(ny-1)]
                 unknowns[name+'wake_circ'][1:, :] = params[name+'prev_wake_circ']
 
             i += num_panels
@@ -560,6 +549,9 @@ class VLMCirculations(Component):
         # expected velocities at each collocation point
         v_c_pts = numpy.zeros((self.rhs.shape[0], 3), order='C')
         v_c_pts[:, ::3] = params['v']
+
+        if self.t > 0:
+            v_c_pts += unknowns['v_wake_on_wing']
 
         # Reshape the normals so that we can correctly produce the rhs
         norm = params[name+'normals'].reshape(-1, 3, order='C')
@@ -590,8 +582,7 @@ class VLMCirculations(Component):
 
             fd_jac = self.complex_step_jacobian(params, unknowns, resids,
                                              fd_params=[name+'normals', 'alpha',
-                                                        name+'def_mesh', name+'b_pts',
-                                                        name+'c_pts'],
+                                                        name+'b_pts', name+'c_pts'],
                                              fd_states=[])
             jac.update(fd_jac)
 
@@ -618,84 +609,95 @@ class InducedVelocities(Component):
     'v_wing_on_wing_' + str(t) = velocity of c_pts (wing panels) induced by wing panels, at the time step t
     'v_wakewing_on_wake_' + str(t) = velocity of wake_mesh (wake points) induced by wing and wake panels, at the time step t """
 
-    def __init__(self, surfaces, transient, t, dt):
+    def __init__(self, surfaces, t, dt, transient):
         super(InducedVelocities, self).__init__()
+
+        tot_panels = 0
+        for surface in surfaces:
+            self.surface = surface
+            ny = surface['num_y']
+            nx = surface['num_x']
+            name = surface['name']
+
+            self.add_param(name+'b_pts', val=numpy.zeros((nx, ny, 3),
+                           dtype="complex"))
+            self.add_param(name+'c_pts', val=numpy.zeros((nx-1, ny-1, 3),
+                           dtype="complex"))
+            self.add_param(name+'wake_mesh', val=numpy.zeros((t+1, ny, 3), dtype="complex"))
+            self.add_param(name+'wake_mesh_local_frame', val=numpy.zeros((t+1, ny, 3), dtype="complex"))
+            tot_panels += (surface['num_x'] - 1) * (surface['num_y'] - 1)
+
+        self.tot_panels = tot_panels
 
         self.surfaces = surfaces
         self.transient = transient
         self.t = t
-        self.dt = t
+        self.dt = dt
 
         self.add_param('v', val=10.)
-        self.add_param('dt', val=0.1)
-        size = (nx-1) * (n-1)
-        self.add_param('circ_' + str(t), val=numpy.zeros((size), dtype="complex"))
-        self.add_output('v_wing_on_wing_' + str(t), val=numpy.zeros((size, 3), dtype="complex"))
+        self.add_param('alpha', val=10.)
 
-        size_wake_mesh = n * t
-        size_a3 = (n-1) * t
+        size = (nx-1) * (ny-1)
+        self.add_param('circulations', val=numpy.zeros((tot_panels), dtype="complex"))
+        self.add_output('v_wing_on_wing', val=numpy.zeros((tot_panels, 3), dtype="complex"))
+
+        size_wake_mesh = ny * t
+        size_a3 = (ny-1) * t
 
         # Only need wake induced velocity if it exists
         if t > 0:
-        	size_wake = (n-1) * t
-        	self.add_param('circ_wake_' + str(t), val=numpy.zeros((size_wake), dtype="complex"))
-        	self.add_param('wake_mesh_' + str(t), val=numpy.zeros((t+1, n, 3), dtype="complex"))
-        	self.add_output('v_wakewing_on_wake_' + str(t), val=numpy.zeros((size_wake_mesh, 3), dtype="complex"))
+            self.add_param('wake_circ', val=numpy.zeros((t, ny-1), dtype="complex"))
+            self.add_output('v_wakewing_on_wake', val=numpy.zeros((size_wake_mesh, 3), dtype="complex"))
 
-        	self.w_wake = numpy.zeros((size_wake_mesh, 3), dtype="complex")
-        	self.a3_mtx = numpy.zeros((size_wake_mesh, size_a3, 3), dtype="complex")
+            self.w_wake = numpy.zeros((size_wake_mesh, 3), dtype="complex")
+            self.a3_mtx = numpy.zeros((size_wake_mesh, size_a3, 3), dtype="complex")
+            self.a2_mtx = numpy.zeros((size_wake_mesh, tot_panels, 3), dtype="complex")
 
-        self.v_wing = numpy.zeros((size, 3), dtype="complex")
+        self.v_wing = numpy.zeros((tot_panels, 3), dtype="complex")
         self.w_wing = numpy.zeros((size_wake_mesh, 3), dtype="complex")
-        self.a2_mtx = numpy.zeros((size_wake_mesh, size, 3), dtype="complex")
 
         # Cap the size of the wake mesh based on the desired number of wake rows
-        if t < nw:
-        	self.wake_mesh_local_frame = numpy.zeros((t+1, n, 3), dtype="complex")
-        else:
-        	self.wake_mesh_local_frame = numpy.zeros((nw+1, n, 3), dtype="complex")
+        self.wake_mesh_local_frame = numpy.zeros((t+1, ny, 3), dtype="complex")
 
-        self.a_mtx = numpy.zeros((size, size, 3), dtype="complex")
-        self.b_mtx = numpy.zeros((size, size, 3), dtype="complex")
+        self.a_mtx = numpy.zeros((tot_panels, tot_panels, 3), dtype="complex")
+        self.b_mtx = numpy.zeros((tot_panels, tot_panels, 3), dtype="complex")
 
     def solve_nonlinear(self, params, unknowns, resids):
 
-        b_AIC_mtx = _assemble_AIC_mtx('b_pts', 'c_pts', self.a_mtx, params, self.surfaces, self.transient, skip=True)
+        t = self.t
+        dt = self.dt
+
+        _assemble_AIC_mtx('b_pts', 'c_pts', self.a_mtx, params, self.surfaces, self.transient, skip=True)
 
         # Obtain the induced velocity on the wing caused by the wing
         # by using the b_mtx previously obtained.
         # We currently do this in OAS too.
         for ind in xrange(3):
-        	self.v_wing[:, ind] = b_AIC_mtx[:, :, ind].dot(params['circ_' + str(t)])
+        	self.v_wing[:, ind] = self.a_mtx[:, :, ind].dot(params['circulations'])
 
         # Induced velocity on wing caused by wing
-        unknowns['v_wing_on_wing_' + str(t)] = self.v_wing
+        unknowns['v_wing_on_wing'] = self.v_wing
 
         # Wake rollup (w)
         if t > 0:
-            # Translate the wake mesh into the local frame
-            translation = numpy.array([params['v'] * params['dt'] * t, 0., 0.])
-            self.wake_mesh_local_frame = params['wake_mesh_' + str(t)] + translation
-
             # params['wake_mesh_' + str(t)] doesn't change with each timestep
             # but self.wake_mesh_local_frame does change with each timestep
 
             # Assemble a2_mtx which is used to calculate the wing induced velocity
             # caused by the wake
-            self.a2_mtx, _ = _assemble_AIC_mtx(params['b_pts_' + str(t)], self.wake_mesh_local_frame[1:,:,], self.a2_mtx)
+            _assemble_AIC_mtx('b_pts', 'wake_mesh_local_frame', self.a2_mtx, params, self.surfaces, self.transient)
 
             # Assemble a3_mtx which is used to calculate the wake induced velocity
             # caused by the wake
-            self.a3_mtx, _ = _assemble_AIC_mtx(params['wake_mesh_' + str(t)][:(t+1), :, :],
-                                  params['wake_mesh_' + str(t)][1:(t+1), :, :], self.a3_mtx)
+            _assemble_AIC_mtx('wake_mesh', 'wake_mesh', self.a3_mtx, params, self.surfaces, self.transient)
 
             # Obtain the induced velocities on the wake caused by the wing and the wake
             for ind in xrange(3):
-            	self.w_wing[:, ind] = self.a2_mtx[:, :, ind].dot(params['circ_' + str(t)])
-            	self.w_wake[:, ind] = self.a3_mtx[:, :, ind].dot(params['circ_wake_' + str(t)][:t*(n-1)])
+            	self.w_wing[:, ind] = self.a2_mtx[:, :, ind].dot(params['circulations'])
+            	self.w_wake[:, ind] = self.a3_mtx[:, :, ind].dot(params['wake_circ'].reshape(-1, order='F'))
 
             # Induced velocity on the wake caused by wing and wake
-            unknowns['v_wakewing_on_wake_' + str(t)] = self.w_wing + self.w_wake
+            unknowns['v_wakewing_on_wake'] = self.w_wing + self.w_wake
 
 class WakeGeometry(Component):
     """ Update position of wake mesh in the body frame, adding a line for each time step
@@ -712,6 +714,7 @@ class WakeGeometry(Component):
     	self.add_param('v', val=10.)
         self.add_param('starting_vortex', val=numpy.zeros((1, ny, 3), dtype="complex"))
     	self.add_output('wake_mesh', val=numpy.zeros((t+2, ny, 3), dtype="complex"))
+        self.add_output('wake_mesh_local_frame', val=numpy.zeros((t+2, ny, 3), dtype="complex"))
 
     	size_wake_mesh = ny * t
 
@@ -733,6 +736,7 @@ class WakeGeometry(Component):
 
         ny = self.ny
         t = self.t
+        dt = self.dt
 
         # Reshape of v_wakewing_on_wake so it can easily be applied to the wake mesh
         if t > 0:
@@ -763,13 +767,15 @@ class WakeGeometry(Component):
         # traveled since then.
         unknowns['wake_mesh'][0, :, :] = self.new_wake_row
 
+        # Translate the wake mesh into the local frame
+        translation = numpy.array([params['v'] * dt * (t+1), 0., 0.])
+        unknowns['wake_mesh_local_frame'] = unknowns['wake_mesh'] + translation
+
 class VLMForces(Component):
     """ Compute aerodynamic forces acting on each section.
-
     Note that some of the parameters and unknowns has the surface name
     prepended on it. E.g., 'def_mesh' on a surface called 'wing' would be
     'wing_def_mesh', etc.
-
     Parameters
     ----------
     def_mesh[nx, ny, 3] : array_like
@@ -786,14 +792,12 @@ class VLMForces(Component):
         Freestream air velocity in m/s.
     rho : float
         Air density in kg/m^3.
-
     Returns
     -------
     sec_forces[nx-1, ny-1, 3] : array_like
         Flattened array containing the sectional forces acting on each panel.
         Stored in Fortran order (only relevant when more than one chordwise
         panel).
-
     """
 
     def __init__(self, surfaces, transient, t, dt):
@@ -811,17 +815,17 @@ class VLMForces(Component):
             self.add_param(name+'c_pts', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
             self.add_param(name+'widths', val=numpy.zeros((nx-1, ny-1), dtype='complex'))
             self.add_output(name+'sec_forces', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
-            self.add_output(name+'last_circ', val=numpy.zeros((t+1, ny-1), dtype='complex'))
-
-            if t > 0:
-                self.add_param(name+'prev_circ', val=numpy.zeros((t, ny-1), dtype='complex'))
-
 
         self.tot_panels = tot_panels
         self.add_param('circulations', val=numpy.zeros((tot_panels)))
         self.add_param('alpha', val=3.)
         self.add_param('v', val=10.)
         self.add_param('rho', val=3.)
+
+        self.add_param('v_wing_on_wing', val=numpy.zeros((tot_panels, 3), dtype="complex"))
+        if t > 0:
+            self.add_param('v_wake_on_wing', val=numpy.zeros((tot_panels, 3), dtype='complex'))
+
         self.surfaces = surfaces
         self.transient = transient
 
@@ -829,8 +833,8 @@ class VLMForces(Component):
         self.v = numpy.zeros((tot_panels, 3), dtype="complex")
         self.t = t
 
-        # self.deriv_options['type'] = 'fd'
-        # self.deriv_options['form'] = 'central'
+        self.deriv_options['type'] = 'fd'
+        self.deriv_options['form'] = 'central'
 
     def solve_nonlinear(self, params, unknowns, resids):
         circ = params['circulations']
@@ -838,20 +842,12 @@ class VLMForces(Component):
         cosa = numpy.cos(alpha)
         sina = numpy.sin(alpha)
 
-        # Assemble a different matrix here than the AIC_mtx from above; Note
-        # that the collocation points used here are the midpoints of each
-        # bound vortex filament, not the collocation points from above
-        # _assemble_AIC_mtx(self.mtx, params, self.surfaces, self.transient, skip=True)
+        self.v = params['v_wing_on_wing']
 
-        # Compute the induced velocities at the midpoints of the
-        # bound vortex filaments
-        for ind in xrange(3):
-            self.v[:, ind] = self.mtx[:, :, ind].dot(circ)
+        self.v[:, 0] += params['v']
 
-        # Add the freestream velocity to the induced velocity so that
-        # self.v is the total velocity seen at the point
-        self.v[:, 0] += cosa * params['v']
-        self.v[:, 2] += sina * params['v']
+        if self.t > 0:
+            self.v += params['v_wake_on_wing']
 
         i = 0
         for surface in self.surfaces:
@@ -882,40 +878,8 @@ class VLMForces(Component):
                     sec_forces[j*(ny-1):(j+1)*(ny-1), ind] = \
                         (circ_slice[j, :] - circ_slice[j-1, :]) * cross_slice[j, :, ind]
 
-
             unknowns[name+'sec_forces'] = params['rho'] * sec_forces.reshape((nx-1, ny-1, 3), order='C')
-
-            unknowns[name+'last_circ'][0, :] = circ_slice[-1, :]
-            if self.t > 0:
-                unknowns[name+'last_circ'][1:, :] = params[name+'prev_circ']
-
             i += num_panels
-
-    def linearize(self, params, unknowns, resids):
-        """ Jacobian for forces."""
-
-        jac = self.alloc_jacobian()
-
-        fd_jac = self.complex_step_jacobian(params, unknowns, resids,
-                                         fd_params=['alpha', 'circulations', 'v'],
-                                         fd_states=[])
-        jac.update(fd_jac)
-
-        rho = params['rho'].real
-
-        for surface in self.surfaces:
-            name = surface['name']
-
-            fd_jac = self.complex_step_jacobian(params, unknowns, resids,
-                                             fd_params=[name+'b_pts',
-                                                name+'def_mesh'],
-                                             fd_states=[])
-            jac.update(fd_jac)
-
-            sec_forces = unknowns[name+'sec_forces'].real
-            jac[name+'sec_forces', 'rho'] = sec_forces.flatten() / rho
-
-        return jac
 
 
 class VLMLiftDrag(Component):
