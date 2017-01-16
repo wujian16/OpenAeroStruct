@@ -538,7 +538,7 @@ class VLMCirculations(Component):
             # on the wing from the wake.
             # This is used to set the RHS of the system to solve for the new circulations.
             for ind in xrange(3):
-                unknowns['v_wake_on_wing'][:, ind] = self.a1_mtx[:, :, ind].dot(unknowns[name+'wake_circ'][0])
+                unknowns['v_wake_on_wing'][:, ind] = self.a1_mtx[:, :, ind].dot(unknowns[name+'wake_circ'].reshape(-1, order='C'))
 
         # Construct a matrix that is the AIC_mtx dotted by the normals at each
         # collocation point. This is used to compute the circulations

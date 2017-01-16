@@ -562,8 +562,8 @@ class OASProblem():
                 else:
                     root.connect(name[:-1] + '.def_mesh', name + 'geom.def_mesh')
 
-                if t > 1:
-                    ts_group.connect('aero_states.v_wakewing_on_wake', 'wake.v_wakewing_on_wake')
+                if t > 0:
+                    ts_group.connect('aero_states.v_wakewing_on_wake', 'wing_wake.v_wakewing_on_wake')
 
                 # ts_group.connect(name + 'geom.def_mesh', 'aero_states.' + name + 'def_mesh')
                 ts_group.connect(name + 'geom.b_pts', 'aero_states.' + name + 'b_pts')
