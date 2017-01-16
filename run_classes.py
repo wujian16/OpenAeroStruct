@@ -578,7 +578,7 @@ class OASProblem():
 
                 # Connect S_ref for performance calcs
                 ts_group.connect(name + 'geom.S_ref', name + 'perf.S_ref')
-
+                
                 ts_group.connect(name + 'geom.starting_vortex', name + 'wake.starting_vortex')
 
             if transient:

@@ -518,10 +518,10 @@ class VLMCirculations(Component):
             flattened_normals[i:i+num_panels, :] = params[name+'normals'].reshape(-1, 3, order='C')
 
             if self.t == 1:
-                unknowns[name+'wake_circ'] = params[name+'prev_circ'][(nx-2)*(ny-1):]
+                unknowns[name+'wake_circ'] = params[name+'prev_circ'][-(ny-1):]
 
             if self.t > 1:
-                unknowns[name+'wake_circ'][0, :] = params[name+'prev_circ'][(nx-2)*(ny-1)]
+                unknowns[name+'wake_circ'][0, :] = params[name+'prev_circ'][-(ny-1):]
                 unknowns[name+'wake_circ'][1:, :] = params[name+'prev_wake_circ']
 
             i += num_panels
@@ -624,8 +624,9 @@ class InducedVelocities(Component):
                            dtype="complex"))
             self.add_param(name+'c_pts', val=numpy.zeros((nx-1, ny-1, 3),
                            dtype="complex"))
-            self.add_param(name+'wake_mesh', val=numpy.zeros((t+1, ny, 3), dtype="complex"))
-            self.add_param(name+'wake_mesh_local_frame', val=numpy.zeros((t+1, ny, 3), dtype="complex"))
+            if t > 0:
+                self.add_param(name+'wake_mesh', val=numpy.zeros((t+1, ny, 3), dtype="complex"))
+                self.add_param(name+'wake_mesh_local_frame', val=numpy.zeros((t+1, ny, 3), dtype="complex"))
             tot_panels += (surface['num_x'] - 1) * (surface['num_y'] - 1)
 
         self.tot_panels = tot_panels
@@ -647,7 +648,7 @@ class InducedVelocities(Component):
 
         # Only need wake induced velocity if it exists
         if t > 0:
-            self.add_param('wake_circ', val=numpy.zeros((t, ny-1), dtype="complex"))
+            self.add_param(name+'wake_circ', val=numpy.zeros((t, ny-1), dtype="complex"))
             self.add_output('v_wakewing_on_wake', val=numpy.zeros((size_wake_mesh, 3), dtype="complex"))
 
             self.w_wake = numpy.zeros((size_wake_mesh, 3), dtype="complex")
@@ -679,6 +680,8 @@ class InducedVelocities(Component):
         # Induced velocity on wing caused by wing
         unknowns['v_wing_on_wing'] = self.v_wing
 
+        name = self.surfaces[0]['name']
+
         # Wake rollup (w)
         if t > 0:
             # params['wake_mesh_' + str(t)] doesn't change with each timestep
@@ -695,10 +698,10 @@ class InducedVelocities(Component):
             # Obtain the induced velocities on the wake caused by the wing and the wake
             for ind in xrange(3):
             	self.w_wing[:, ind] = self.a2_mtx[:, :, ind].dot(params['circulations'])
-            	self.w_wake[:, ind] = self.a3_mtx[:, :, ind].dot(params['wake_circ'].reshape(-1, order='F'))
+            	self.w_wake[:, ind] = self.a3_mtx[:, :, ind].dot(params[name+'wake_circ'].reshape(-1, order='C'))
 
             # Induced velocity on the wake caused by wing and wake
-            unknowns['v_wakewing_on_wake'] = self.w_wing + self.w_wake
+            unknowns['v_wakewing_on_wake'][:] = self.w_wing + self.w_wake
 
 class WakeGeometry(Component):
     """ Update position of wake mesh in the body frame, adding a line for each time step
@@ -709,8 +712,6 @@ class WakeGeometry(Component):
 
         nx = surface['num_x']
         ny = surface['num_y']
-
-    	nt = t + 1
 
     	self.add_param('v', val=10.)
         self.add_param('starting_vortex', val=numpy.zeros((1, ny, 3), dtype="complex"))
@@ -811,7 +812,6 @@ class VLMForces(Component):
             ny = surface['num_y']
             nx = surface['num_x']
 
-            self.add_param(name+'def_mesh', val=numpy.zeros((nx, ny, 3), dtype='complex'))
             self.add_param(name+'b_pts', val=numpy.zeros((nx, ny, 3), dtype='complex'))
             self.add_param(name+'c_pts', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
             self.add_param(name+'widths', val=numpy.zeros((nx-1, ny-1), dtype='complex'))
