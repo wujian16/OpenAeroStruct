@@ -327,6 +327,7 @@ class VLMGeometry(Component):
         rot_z = numpy.array([sina, 0,  cosa])
 
         nx, ny = self.nx, self.ny
+        print nx, ny
         mesh = params['def_mesh']
 
         b_pts = unknowns['b_pts']
