@@ -436,7 +436,7 @@ contains
     complex(kind=8), intent(out) :: mtx((nx-1)*(ny-1), (nx_-1)*(ny_-1), 3)
 
     ! Working
-    integer :: el_j, el_i, cp_j, cp_i, el_loc_j, el_loc, cp_loc_j, cp_loc
+    integer :: el_j, el_i, cp_j, cp_i, el_loc_i, el_loc, cp_loc_i, cp_loc
     complex(kind=8) :: pi, P(3), A(3), B(3), u(3), C(3), D(3), C_far(3), D_far(3)
     complex(kind=8) :: A_sym(3), B_sym(3), C_sym(3), D_sym(3), C_far_sym(3), D_far_sym(3)
     complex(kind=8) :: ur2(3), r1(3), r2(3), r1_mag, r2_mag
@@ -455,106 +455,71 @@ contains
 
     mtx(:, :, :) = 0.
 
-      do el_j = 1, ny_-1 ! spanwise loop through horseshoe elements
-        el_loc_j = (el_j - 1) * (nx_ - 1)
+    do el_i = 1, nx_-1 ! spanwise loop through horseshoe elements
+      el_loc_i = (el_i - 1) * (ny_ - 1)
 
-        do el_i = 1, nx_-1 ! chordwise loop through horseshoe elements
-          el_loc = el_i + el_loc_j
+      do el_j = 1, ny_-1 ! chordwise loop through horseshoe elements
+        el_loc = el_loc_i + el_j
 
-          A = bpts(el_i + 0, el_j + 0, :)
-          B = bpts(el_i + 0, el_j + 1, :)
+        A = bpts(el_i + 0, el_j + 0, :)
+        B = bpts(el_i + 0, el_j + 1, :)
+        C = bpts(el_i + 1, el_j + 1, :)
+        D = bpts(el_i + 1, el_j + 0, :)
 
-          C = bpts(el_i + 1, el_j + 1, :)
-          D = bpts(el_i + 1, el_j + 0, :)
+        if (symmetry) then
+          A_sym = A
+          A_sym(2) = -A(2)
+          B_sym = B
+          B_sym(2) = -B(2)
+          C_sym = C
+          C_sym(2) = -C(2)
+          D_sym = D
+          D_sym(2) = -D(2)
+        end if
 
-          if (el_i .EQ. nx_ - 1) then
-            C_far = 1.e6 * u + C
-            D_far = 1.e6 * u + D
-          end if
+        do cp_i = 1, nx-1 ! spanwise loop through control points
+          cp_loc_i = (cp_i - 1) * (ny - 1)
 
-          if (symmetry) then
-            A_sym = A
-            A_sym(2) = -A(2)
-            B_sym = B
-            B_sym(2) = -B(2)
-            C_sym = C
-            C_sym(2) = -C(2)
-            D_sym = D
-            D_sym(2) = -D(2)
+          do cp_j = 1, ny-1 ! chordwise loop through control points
+            cp_loc = cp_loc_i + cp_j
 
-            if (el_i .EQ. nx_ - 1) then
-              C_far_sym = C_far
-              C_far_sym(2) = -C_far(2)
-              D_far_sym = D_far
-              D_far_sym(2) = -D_far(2)
+            P = points(cp_i, cp_j, :)
+
+            bound(:) = 0.
+
+            call calc_vorticity(B, C, P, bound)
+            call calc_vorticity(D, A, P, bound)
+
+            if (skip) then
+              if (el_i .eq. nx_-1) then
+                call calc_vorticity(C, D, P, bound)
+              end if
+
+            else
+              call calc_vorticity(A, B, P, bound)
+              call calc_vorticity(C, D, P, bound)
             end if
-          end if
 
-          do cp_j = 1, ny-1 ! spanwise loop through control points
-            cp_loc_j = (cp_j - 1) * (nx - 1)
+            if (symmetry) then
+              call calc_vorticity(C_sym, B_sym, P, bound)
+              call calc_vorticity(A_sym, D_sym, P, bound)
 
-            do cp_i = 1, nx-1 ! chordwise loop through control points
-              cp_loc = cp_i + cp_loc_j
-
-              P = points(cp_i, cp_j, :)
-
-              bound(:) = 0.
-
-              call calc_vorticity(B, C, P, bound)
-              call calc_vorticity(D, A, P, bound)
-
-              if (symmetry) then
-                call calc_vorticity(C_sym, B_sym, P, bound)
-                call calc_vorticity(A_sym, D_sym, P, bound)
-              end if
-
-              if (.not. skip) then
-                call calc_vorticity(A, B, P, bound)
-
-                if (symmetry) then
-                  call calc_vorticity(B_sym, A_sym, P, bound)
+              if (skip) then
+                if (el_i .eq. nx_-1) then
+                  call calc_vorticity(D_sym, C_sym, P, bound)
                 end if
-
-                if (el_i .lt. nx_ - 1) then
-                  call calc_vorticity(C, D, P, bound)
-                  if (symmetry) then
-                    call calc_vorticity(D_sym, C_sym, P, bound)
-                  end if
-                end if
-
               else
-                if (.not. (el_loc .eq. cp_loc)) then
-                  call calc_vorticity(A, B, P, bound)
-                end if
-                if (symmetry) then
-                  call calc_vorticity(B_sym, A_sym, P, bound)
-                end if
-
-                if (.not. ((el_i + 1 .eq. cp_i) .and. (el_j .eq. cp_j))) then
-                  if (el_i .lt. nx_ - 1) then
-                    call calc_vorticity(C, D, P, bound)
-                    if (symmetry) then
-                      call calc_vorticity(D_sym, C_sym, P, bound)
-                    end if
-                  end if
-                end if
+                call calc_vorticity(B_sym, A_sym, P, bound)
+                call calc_vorticity(D_sym, C_sym, P, bound)
               end if
+            end if
 
-              if ((el_i .eq. nx_ - 1) .and. .not. transient) then
-                call calc_vorticity(C, C_far, P, bound)
-                call calc_vorticity(D_far, D, P, bound)
-                if (symmetry) then
-                  call calc_vorticity(C_far_sym, C_sym, P, bound)
-                  call calc_vorticity(D_sym, D_far_sym, P, bound)
-                end if
-              end if
+            mtx(cp_loc, el_loc, :) = bound
 
-              mtx(cp_loc, el_loc, :) = bound
-
-            end do
           end do
         end do
       end do
+    end do
 
   end subroutine assembleaeromtx_main
 
@@ -571,70 +536,27 @@ contains
     complex(kind=8), intent(inout) :: out(3)
 
     ! Working
-    complex(kind=8) :: r1(3), r2(3), r1_mag, r2_mag, r1r2(3), mag_mult, dot_r1r2
+    complex(kind=8) :: rAP(3), rBP(3), rAP_len, rBP_len, cross(3), may, dot_ABP
+    complex(kind=8) :: r_cut
 
-    r1 = P - A
-    r2 = P - B
+    rAP = P - A
+    rBP = P - B
 
-    call normc(r1, r1_mag)
-    call normc(r2, r2_mag)
+    call normc(rAP, rAP_len)
+    call normc(rBP, rBP_len)
 
-    call crossc(r1, r2, r1r2)
-    mag_mult = r1_mag * r2_mag
+    call crossc(rAP, rBP, cross)
+    may = sum(cross**2)
 
-    call dotc(r1, r2, dot_r1r2)
-    out = out + (r1_mag + r2_mag) * r1r2 / (mag_mult * (mag_mult + dot_r1r2))
+    r_cut = 1.e-10
+    if ((real(rAP_len) .lt. real(r_cut)) .or. (real(rBP_len) .lt. real(r_cut)) .or. (real(may) .lt. real(r_cut))) then
+      out = out
+    else
+      call dotc(rAP, rBP, dot_ABP)
+      out = out + (rAP_len + rBP_len) * cross / (rAP_len * rBP_len * (rAP_len * rBP_len + dot_ABP))
+    end if
 
   end subroutine calc_vorticity
-
-
-
-  subroutine biotsavart(A, B, P, inf, rev, out)
-
-    implicit none
-
-    ! Input
-    complex(kind=8), intent(in) :: A(3), B(3), P(3)
-    logical, intent(in) :: inf, rev
-
-    ! Output
-    complex(kind=8), intent(inout) :: out(3)
-
-    ! Working
-    complex(kind=8) :: rPA, rPB, rAB, rH
-    complex(kind=8) :: cosA, cosB, C(3)
-    complex(kind=8) :: eps, tmp(3), dot_BAPA, dot_BABA, dot_PBAB
-
-    eps = 1e-5
-
-    call normc(A - P, rPA)
-    call normc(B - P, rPB)
-    call normc(B - A, rAB)
-
-    call dotc(B - A, P - A, dot_BAPA)
-    call dotc(B - A, B - A, dot_BABA)
-    call dotc(P - B, A - B, dot_PBAB)
-
-    call normc(P - A - dot_BAPA / dot_BABA * (B - A), rH)
-    rH = rH + eps
-    cosA = dot_BAPA / (rPA * rAB)
-    cosB = dot_PBAB / (rPB * rAB)
-    call crossc(B - P, A - P, C)
-    call unitc(C, C)
-
-    if (inf) then
-       tmp = -C / rH * (cosA + 1)
-    else
-       tmp = -C / rH * (cosA + cosB)
-    end if
-
-    if (rev) then
-       tmp = -tmp
-    end if
-
-    out = out + tmp
-
-  end subroutine biotsavart
 
 
 ! COMPLEX FUNCTIONS
