@@ -532,7 +532,7 @@ class OASProblem():
 
                 # Add a performance group for each surface
                 name = name + 'perf'
-                exec('ts_group.add("' + name + '", ' + 'VLMFunctionals(surface, t, dt)' + ', promotes=["v", "alpha", "M", "Re", "rho"])')
+                exec('ts_group.add("' + name + '", ' + 'VLMFunctionals(surface, t, dt)' + ', promotes=["v", "rho"])')
 
                 # Explicitly connect parameters from each surface's group and the common
                 # 'aero_states' group.
@@ -574,15 +574,17 @@ class OASProblem():
                 ts_group.connect(name + 'geom.lengths', 'aero_states.' + name + 'lengths')
 
                 # Connect the results from 'aero_states' to the performance groups
-                ts_group.connect('aero_states.' + name + 'sec_forces', name + 'perf.sec_forces')
+                # ts_group.connect('aero_states.' + name + 'sec_forces', name + 'perf.sec_forces')
+                ts_group.connect('aero_states.' + name + 'L', name + 'perf.L')
+                ts_group.connect('aero_states.' + name + 'D', name + 'perf.D')
 
                 # Connect S_ref for performance calcs
                 ts_group.connect(name + 'geom.S_ref', name + 'perf.S_ref')
-                
+
                 ts_group.connect(name + 'geom.starting_vortex', name + 'wake.starting_vortex')
 
             if transient:
-                exec('root.add("' + ts_group_name[:-1] + '", ts_group, promotes=["v", "alpha", "M", "Re", "rho"])')
+                exec('root.add("' + ts_group_name[:-1] + '", ts_group, promotes=["v", "alpha", "rho"])')
 
         # Actually set up the problem
         self.setup_prob()

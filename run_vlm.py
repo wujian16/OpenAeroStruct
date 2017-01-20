@@ -21,7 +21,8 @@ if __name__ == "__main__":
     st = time()
 
     # Set problem type
-    prob_dict = {'type' : 'aero'}
+    prob_dict = {'type' : 'aero',
+                 'alpha' : 5.}
 
     if sys.argv[1].startswith('0'):  # run analysis once
         prob_dict.update({'optimize' : False})
@@ -33,9 +34,11 @@ if __name__ == "__main__":
     OAS_prob.add_surface({'name' : 'wing',
                         #   'wing_type' : 'CRM',
                           'symmetry' : True,
-                          'num_y' : 5,
-                          'num_x' : 2,
-                          'span_cos_spacing' : 0.,
+                          'num_y' : 201,
+                          'num_x' : 11,
+                          'span_cos_spacing' : 1.,
+                          'chord_cos_spacing' : 1.,
+
                         #   'taper' : .2,
                         #   'sweep' : 0.,
                           })

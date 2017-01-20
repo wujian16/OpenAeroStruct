@@ -390,8 +390,8 @@ class VLMGeometry(Component):
 
         # Compute the normal of each panel by taking the cross-product of
         # its diagonals. Note that this could be a nonplanar surface
-        normals = numpy.cross(b_pts[:-1,  1:, :] - b_pts[ 1:, :-1, :],
-                              b_pts[:-1, :-1, :] - b_pts[ 1:,  1:, :], axis=2)
+        normals = numpy.cross(mesh[:-1,  1:, :] - mesh[ 1:, :-1, :],
+                              mesh[:-1, :-1, :] - mesh[ 1:,  1:, :], axis=2)
 
         # Compute the area of the panels based on the normals.
         # Note that the area is computed from the normals based on the mesh.
@@ -818,6 +818,8 @@ class VLMForces(Component):
             self.add_param(name+'normals', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
             self.add_param(name+'lengths', val=numpy.zeros((nx-1, ny-1)))
             self.add_output(name+'sec_forces', val=numpy.zeros((nx-1, ny-1, 3), dtype='complex'))
+            self.add_output(name+'L', val=0.)
+            self.add_output(name+'D', val=0.)
 
         self.tot_panels = tot_panels
         self.add_param('circulations', val=numpy.zeros((tot_panels)))
@@ -844,6 +846,7 @@ class VLMForces(Component):
 
     def solve_nonlinear(self, params, unknowns, resids):
         nx, ny = self.surfaces[0]['num_x'], self.surfaces[0]['num_y']
+        name = self.surfaces[0]['name']
 
         velo = numpy.zeros((nx-1, ny-1, 3))
 
@@ -869,7 +872,7 @@ class VLMForces(Component):
         # from the leading edge
         unknowns['sigma'] = 0.5 * self.loc_circ
         unknowns['sigma'][1:, :] += circ_mtx[:-1, :]
-        unknowns['sigma'] *= params['wing_lengths']
+        unknowns['sigma'] *= params[name+'lengths']
 
         # Obtain the change in circulation per timestep
         if self.t == 0:
@@ -878,90 +881,21 @@ class VLMForces(Component):
             dCirc_dt = (unknowns['sigma'] - params['prev_sigma']) / self.dt
 
         # Lift for each panel
-        forces_L = (velo[:, :, 0] * self.loc_circ + dCirc_dt) * params['wing_widths'] * params['wing_normals'][:, :, 2] * params['rho']
+        forces_L = (velo[:, :, 0] * self.loc_circ + dCirc_dt) * params[name+'widths'] * params[name+'normals'][:, :, 2] * params['rho']
 
         # Induced drag for each panel
-        forces_D = params['wing_widths'] * (-vind * self.loc_circ + dCirc_dt * params['wing_normals'][:, :, 0]) * params['rho']
+        forces_D = params[name+'widths'] * (-vind * self.loc_circ + dCirc_dt * params[name+'normals'][:, :, 0]) * params['rho']
 
         # section forces for structural part
-        projected_forces = numpy.array(params['wing_normals'], dtype="complex")
+        projected_forces = numpy.array(params[name+'normals'], dtype="complex")
         for ind in xrange(3):
         	projected_forces[:, :, ind] *= forces_L
 
-        unknowns['wing_sec_forces'] = numpy.zeros((nx-1, ny-1, 3))
+        unknowns[name+'sec_forces'] = numpy.zeros((nx-1, ny-1, 3))
 
         print "L: {},  D: {}".format(numpy.sum(forces_L).real, numpy.sum(forces_D).real)
 
-
-class VLMLiftDrag(Component):
-    """
-    Calculate total lift and drag in force units based on section forces.
-
-    If the simulation is given a non-zero Reynolds number, it is used to
-    compute the skin friction drag. If Reynolds number == 0, then there is
-    no skin friction drag dependence. Currently, the Reynolds number
-    must be set by the user in the run script and used as in IndepVarComp.
-
-    Parameters
-    ----------
-    sec_forces[nx-1, ny-1, 3] : array_like
-        Flattened array containing the sectional forces acting on each panel.
-        Stored in Fortran order (only relevant when more than one chordwise
-        panel).
-    alpha : float
-        Angle of attack in degrees.
-    Re : float
-        Reynolds number.
-    M : float
-        Mach number.
-    v : float
-        Freestream air velocity in m/s.
-    rho : float
-        Air density in kg/m^3.
-    S_ref : float
-        The reference area of the lifting surface.
-
-    Returns
-    -------
-    L : float
-        Total lift force for the lifting surface.
-    D : float
-        Total drag force for the lifting surface.
-
-    """
-
-    def __init__(self, surface):
-        super(VLMLiftDrag, self).__init__()
-
-        self.surface = surface
-        ny = surface['num_y']
-        nx = surface['num_x']
-
-        self.add_param('sec_forces', val=numpy.zeros((nx - 1, ny - 1, 3)))
-        self.add_param('alpha', val=3.)
-        self.add_param('Re', val=5.e6)
-        self.add_param('M', val=.84)
-        self.add_param('v', val=10.)
-        self.add_param('rho', val=3.)
-        self.add_param('S_ref', val=0.)
-        self.add_output('L', val=0.)
-        self.add_output('D', val=0.)
-
-        self.deriv_options['type'] = 'cs'
-        self.deriv_options['form'] = 'central'
-
-    def solve_nonlinear(self, params, unknowns, resids):
-        forces = params['sec_forces'].reshape(-1, 3)
-        alpha = params['alpha'] * numpy.pi / 180.
-        cosa = numpy.cos(alpha)
-        sina = numpy.sin(alpha)
-
-        Re = params['Re']
-        M = params['M']
-        v = params['v']
-        rho = params['rho']
-        S_ref = params['S_ref']
-
+        """
         # Compute the skin friction coefficient
         # Use eq. 12.27 of Raymer for turbulent Cf
         # Avoid divide by zero warning if Re == 0
@@ -985,6 +919,11 @@ class VLMLiftDrag(Component):
         if self.surface['symmetry']:
             unknowns['D'] *= 2
             unknowns['L'] *= 2
+        """
+
+        unknowns[name+'L'] = numpy.sum(forces_L)
+        unknowns[name+'D'] = numpy.sum(forces_D)
+
 
 class VLMCoeffs(Component):
     """ Compute lift and drag coefficients.
@@ -1035,8 +974,8 @@ class VLMCoeffs(Component):
         L = params['L']
         D = params['D']
 
-        if self.surface['symmetry']:
-            S_ref *= 2
+        # if self.surface['symmetry']:
+        #     S_ref *= 2
 
         unknowns['CL'] = L / (0.5 * rho * v**2 * S_ref) + self.surface['CL0']
         unknowns['CD'] = D / (0.5 * rho * v**2 * S_ref) + self.surface['CD0']
@@ -1069,9 +1008,6 @@ class VLMFunctionals(Group):
     def __init__(self, surface, t, dt):
         super(VLMFunctionals, self).__init__()
 
-        self.add('liftdrag',
-                 VLMLiftDrag(surface),
-                 promotes=['*'])
         self.add('coeffs',
                  VLMCoeffs(surface),
                  promotes=['*'])
