@@ -20,7 +20,7 @@ from openmdao.devtools.partition_tree_n2 import view_tree
 # =============================================================================
 # OpenAeroStruct modules
 # =============================================================================
-from geometry import GeometryMesh, Bspline, gen_crm_mesh, gen_rect_mesh
+from geometry import GeometryMesh, Bspline, gen_crm_mesh, gen_mesh
 from transfer import TransferDisplacements, TransferLoads
 from vlm import VLMStates, VLMFunctionals, VLMGeometry, WakeGeometry, InducedVelocities
 from spatialbeam import SpatialBeamStates, SpatialBeamFunctionals, radii, SpatialBeamFEM, SpatialBeamDisp
@@ -151,7 +151,7 @@ class OASProblem():
         # get the chordwise and spanwise number of points
         if 'mesh' in surf_dict.keys():
             mesh = surf_dict['mesh']
-            num_x, num_y = mesh.shape
+            num_x, num_y = mesh.shape[:2]
 
         # If the user doesn't provide a mesh, obtain the values from surf_dict
         # to create the mesh
@@ -165,8 +165,12 @@ class OASProblem():
 
             # Generate rectangular mesh
             if surf_dict['wing_type'] == 'rect':
-                mesh = gen_rect_mesh(num_x, num_y, span, chord,
+                mesh = gen_mesh(num_x, num_y, span, chord,
                     span_cos_spacing, chord_cos_spacing)
+
+            elif surf_dict['wing_type'] == 'ell':
+                mesh = gen_mesh(num_x, num_y, span, chord,
+                    span_cos_spacing, chord_cos_spacing, 'ell')
 
             # Generate CRM mesh
             elif surf_dict['wing_type'] == 'CRM':

@@ -29,16 +29,18 @@ if __name__ == "__main__":
     else:  # perform optimization
         prob_dict.update({'optimize' : True})
 
+
     # Instantiate problem and add default surface
     OAS_prob = OASProblem(prob_dict)
     OAS_prob.add_surface({'name' : 'wing',
-                        #   'wing_type' : 'CRM',
-                          'symmetry' : True,
-                          'num_y' : 201,
-                          'num_x' : 11,
+                          'wing_type' : 'ell',
+                          'symmetry' : False,
+                          'num_y' : 101,
+                          'num_x' : 2,
                           'span_cos_spacing' : 1.,
                           'chord_cos_spacing' : 1.,
-
+                          'span' : 8.,
+                          'chord' : 1.,
                         #   'taper' : .2,
                         #   'sweep' : 0.,
                           })

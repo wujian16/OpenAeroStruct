@@ -924,6 +924,10 @@ class VLMForces(Component):
         unknowns[name+'L'] = numpy.sum(forces_L)
         unknowns[name+'D'] = numpy.sum(forces_D)
 
+        if self.surfaces[0]['symmetry']:
+            unknowns[name+'L'] *= 2.
+            unknowns[name+'D'] *= 2.
+
 
 class VLMCoeffs(Component):
     """ Compute lift and drag coefficients.
